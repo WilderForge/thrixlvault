@@ -1,0 +1,46 @@
+plugins {
+	id 'java-library'
+	id 'maven-publish'
+	id 'eclipse'
+}
+
+version = thrixlVaultVersion
+group = "com.wildermods"
+archivesBaseName = "thrixlvault"
+
+apply from: 'replaceTokenScript.gradle'
+apply from: 'publishScript.gradle'
+
+repositories {
+	mavenCentral()
+    maven {
+        url "https://maven.wildermods.com/"
+    }
+}
+
+dependencies {
+
+	implementation (libs.commons.io)
+	implementation (libs.commons.lang)
+	implementation (libs.gson)
+	implementation (libs.guava)
+	implementation (libs.log4j)
+	implementation (libs.masshash)
+
+	// Use JUnit Jupiter for testing.
+	testImplementation (libs.junit)
+	testRuntimeOnly (libs.junit.platform)
+	
+}
+
+// Apply a specific Java toolchain to ease working on different environments.
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+tasks.named('test') {
+	// Use JUnit Platform for unit tests.
+	useJUnitPlatform()
+}
