@@ -59,6 +59,12 @@ public class SteamDownloader {
 		this.installDir = DEFAULT_APP_INSTALL_DIR;
 	}
 	
+	public SteamDownloader(String username, Collection<IDownloadable> downloads, Path installDir) {
+		this.username = username;
+		this.downloadables = downloads;
+		this.installDir = installDir;
+	}
+	
 	public Set<IDownload> run() throws Throwable {
 		return run((c) -> {});
 	}
@@ -93,6 +99,7 @@ public class SteamDownloader {
 				int downloadProgress = 0;
 				currentDownload = null;
 				boolean next = false;
+				
 				while ((byteRead = inputStream.read()) != -1 || next) {
 					responded();
 					char outputChar = 0;
@@ -133,7 +140,7 @@ public class SteamDownloader {
 								downloadProgress++;
 								IDownload download = processedDownloads.get(currentDownload);
 								if(download == null) {
-									putDownload(onManifestDownload, currentDownload, new CompletedDownload(currentDownload, DEFAULT_APP_INSTALL_DIR));
+									putDownload(onManifestDownload, currentDownload, new CompletedDownload(currentDownload, installDir));
 									System.out.println("\n[" + downloadProgress + "/" + this.downloadables.size() + "] Downloaded " + currentDownload);
 								}
 								else {
@@ -156,7 +163,7 @@ public class SteamDownloader {
 									}
 								}
 								System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Downloading " + currentDownload);
-								send(currentDownload.getDownloadCommand(DEFAULT_APP_INSTALL_DIR));
+								send(currentDownload.getDownloadCommand(installDir));
 							}
 							else {
 								next = true;
@@ -177,7 +184,7 @@ public class SteamDownloader {
 						}
 						if(getState() == FAILURE) {
 							if(prevState == DOWNLOADING && currentDownload != null) {
-								putDownload(onManifestDownload, currentDownload, new FailedDownload(currentDownload, DEFAULT_APP_INSTALL_DIR, new Exception("Could not download " + currentDownload + ". Reason: " + line.toString().trim())));
+								putDownload(onManifestDownload, currentDownload, new FailedDownload(currentDownload, installDir, new Exception("Could not download " + currentDownload + ". Reason: " + line.toString().trim())));
 								setState(DOWNLOADING);
 								Thread.sleep(1000);
 							}
@@ -202,7 +209,7 @@ public class SteamDownloader {
 				System.err.println();
 				t.printStackTrace();
 				if(!processedDownloads.containsKey(currentDownload)) {
-					processedDownloads.put(currentDownload, new FailedDownload(currentDownload, DEFAULT_APP_INSTALL_DIR, t));
+					processedDownloads.put(currentDownload, new FailedDownload(currentDownload, installDir, t));
 				}
 				process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly); //for some reason a process leak occurs if we don't do this
 				process.destroyForcibly();
@@ -301,7 +308,7 @@ public class SteamDownloader {
 					InterruptedException e = new InterruptedException();
 					if(steamState == DOWNLOADING) {
 						if(!processedDownloads.containsKey(currentDownload)) {
-							this.processedDownloads.put(currentDownload, new FailedDownload(currentDownload, DEFAULT_APP_INSTALL_DIR, e));
+							this.processedDownloads.put(currentDownload, new FailedDownload(currentDownload, installDir, e));
 						}
 					}
 					throw e;
