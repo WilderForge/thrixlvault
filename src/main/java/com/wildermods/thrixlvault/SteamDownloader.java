@@ -154,12 +154,14 @@ public class SteamDownloader {
 								if(Files.exists(installDir)) {
 									System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Clearing " + installDir);
 									FileUtil.deleteDirectory(installDir);
-									for(Path steamPatchFile : Files.walk(installDir.getParent(), 1) //delete steam patch files from the parent directory so a new download attempt always starts fresh
-										.filter((path) -> { 
-											return path.startsWith("state") && path.endsWith(".patch");
-										}
-									).toList()) {
-										Files.deleteIfExists(steamPatchFile);
+								}
+								for(Path steamPatchFile : Files.walk(installDir.getParent(), 1) //delete steam patch files from the parent directory so a new download attempt always starts fresh
+									.filter((path) -> { 
+										return path.startsWith("state") && path.endsWith(".patch");
+									}
+								).toList()) {
+									if(Files.deleteIfExists(steamPatchFile)){
+										System.out.println("Deleted steam patch file: " + steamPatchFile);
 									}
 								}
 								System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Downloading " + currentDownload);
