@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -19,6 +19,7 @@ import com.google.gson.JsonSyntaxException;
 import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.Hasher;
+import com.wildermods.masshash.utils.Reference;
 
 public class Chrysalis extends Hasher implements Cloneable {
 	
@@ -28,15 +29,15 @@ public class Chrysalis extends Hasher implements Cloneable {
 		//NO-OP
 	};
 	
-	Chrysalis(Path dir, Consumer<Blob> forEachBlob) throws IOException {
+	Chrysalis(Path dir, BiConsumer<Reference<Path>, Blob> forEachBlob) throws IOException {
 		super(Files.walk(dir), forEachBlob);
 	}
-	
+
 	public static Chrysalis fromDir(Path path) throws IOException {
-		return fromDir(path, (blob)->{});
+		return fromDir(path, (p, blob)->{});
 	}
 	
-	public static Chrysalis fromDir(Path path, Consumer<Blob> forEachBlob) throws IOException {
+	public static Chrysalis fromDir(Path path, BiConsumer<Reference<Path>, Blob> forEachBlob) throws IOException {
 		LOGGER.info("Constructing Chrysalis from " + path);
 		Chrysalis ret = new Chrysalis(path, forEachBlob);
 
@@ -45,6 +46,14 @@ public class Chrysalis extends Hasher implements Cloneable {
 	
 	public static Chrysalis fromFile(Path path) throws JsonSyntaxException, JsonIOException, IOException {
 		return Weaver.GSON.fromJson(Files.newBufferedReader(path), Chrysalis.class);
+	}
+	
+	@Override
+	public boolean equals(Object o) {
+		if(o instanceof Chrysalis) {
+			return this.blobs.equals(((Chrysalis)o).blobs);
+		}
+		return false;
 	}
 	
 	@Override

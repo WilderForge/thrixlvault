@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.logging.log4j.LogManager;
@@ -143,8 +144,9 @@ public class Weaver implements IVersioned {
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if the version's integrity has been violated
      * @throws InterruptedException 
+     * @throws ExecutionException 
      */
-	public void verify() throws IntegrityException, IOException, InterruptedException {
+	public void verify() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		vault.verifyBlobs();
 	}
 	
@@ -172,8 +174,9 @@ public class Weaver implements IVersioned {
 		AtomicLong overwrittenBlobs = new AtomicLong();
 		final Set<Path> writtenBlobs = ConcurrentHashMap.newKeySet();
 		final OpenOption[] openOptions = !force ? new StandardOpenOption[] {StandardOpenOption.CREATE_NEW} : new StandardOpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
-		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (blob) -> {
+		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (p, blob) -> {
 			Path blobPath = vault.blobDir.resolve(blob.hash());
+			p.set(sourceDir.relativize(p.get())); //set the path output to be relativized
 			final boolean exists = Files.exists(blobPath);
 			
 			if(!force && exists) {

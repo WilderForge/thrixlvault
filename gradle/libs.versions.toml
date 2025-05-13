@@ -6,7 +6,7 @@ guava_version = "33.4.8-jre"
 junit_version = "5.12.2"
 junit_platform_version = "1.12.2"
 log4j_version = "2.24.3"
-masshash_version = "1.1.0.0"
+masshash_version = "1.2.0.0"
 
 [libraries]
 commons_io = { module = "commons-io:commons-io", version.ref = "commons_io_version" }

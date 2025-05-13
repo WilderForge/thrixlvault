@@ -16,6 +16,7 @@ import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -100,7 +101,7 @@ public class WeaverTests {
 	
 	@Test
 	@Order(3)
-	void databaseVerifyTest() throws IntegrityException, IOException, InterruptedException {
+	void databaseVerifyTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Verification test:");
 		weaver.verify();
 	}
@@ -138,7 +139,7 @@ public class WeaverTests {
 	
 	@Test
 	@Order(6)
-	void verifyOverwriteTest() throws IntegrityException, IOException, InterruptedException {
+	void verifyOverwriteTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Overwrite Verification");
 		weaver.verify();
 		chrysalis = weaver.getChrysalisizedVault().chrysalis;
@@ -171,7 +172,7 @@ public class WeaverTests {
 	
 	@Test
 	@Order(9)
-	void verifyOverwriteRecreationTest() throws IntegrityException, IOException, InterruptedException {
+	void verifyOverwriteRecreationTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Overwrite recreation test");
 		weaver.verify();
 		assertTrue(Files.exists(weaver.getChrysalisizedVault().getBlobFile(randomHash)));
