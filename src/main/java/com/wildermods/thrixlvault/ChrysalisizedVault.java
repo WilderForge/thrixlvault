@@ -8,8 +8,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -55,7 +57,11 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		return chrysalis;
 	}
 	
-	public void verifyBlobs() throws InterruptedException {
+	public void verifyBlobs() throws InterruptedException, IntegrityException, ExecutionException {
+		verifyBlobs(false);
+	}
+	
+	public void verifyBlobs(boolean failFast) throws InterruptedException, IntegrityException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + version);
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
@@ -84,10 +90,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 				else {
 					err = new DatabaseError(msg, t);
 				}
-				t.printStackTrace();
 				problems.put(hash, err);
-				LOGGER.fatal(marker, msg, err);
-				throw err;
 			}
 		});
 
@@ -98,17 +101,18 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 			String message = "Database Verification Failed";
 			DatabaseIntegrityError e = new DatabaseIntegrityError(message, problems.values().toArray(new Throwable[]{}));
 			for(Throwable problem : problems.values()) {
+				if(!(problem instanceof DatabaseError) && !(problem instanceof IntegrityException))
 				e.addSuppressed(problem);
 			}
 			throw e;
 		}
 	}
 	
-	public void verifyDirectory(Path path) throws InterruptedException, IntegrityException {
+	public void verifyDirectory(Path path) throws InterruptedException, IntegrityException, ExecutionException {
 		verifyDirectory(path, true);
 	}
 	
-	public void verifyDirectory(Path path, boolean verifyDatabase) throws InterruptedException, IntegrityException {
+	public void verifyDirectory(Path path, boolean verifyDatabase) throws InterruptedException, IntegrityException, ExecutionException {
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 		
 		LOGGER.info(marker, "Verifying " + path);
@@ -156,29 +160,50 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		}
 	}
 	
-	public void computeOverBlobs(HashTask hashTask) throws InterruptedException {
-		
-		Multiset<Hash> hashes = chrysalis.blobs().keys();
-		int threads = Runtime.getRuntime().availableProcessors();
-		ExecutorService executor = Executors.newFixedThreadPool(threads);
-		List<Callable<Void>> executorTasks = new ArrayList<>();
-		
-		for(Hash hash : hashes.elementSet()) {
-			executorTasks.add(() -> {
-				hashTask.call(hash, blobDir, chrysalis);
-				return null;
-			});
-		}
-		
-		try {
-			executor.invokeAll(executorTasks);
-		}
-		finally {
-			executor.shutdown();
-		}
-	}
 	
-	public void export(Path destDir, boolean verifyBlobs) throws InterruptedException, IntegrityException {
+	boolean terminated = false;
+	
+	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, IntegrityException, ExecutionException {
+	    Multiset<Hash> hashes = chrysalis.blobs().keys();
+	    int threads = Runtime.getRuntime().availableProcessors();
+	    ExecutorService executor = Executors.newFixedThreadPool(threads);
+	    List<Future<Void>> futures = new ArrayList<>();
+
+	    terminated = false;
+	    
+	    try {
+	        for (Hash hash : hashes.elementSet()) {
+	            Future<Void> future = executor.submit(() -> {
+	            	if(!terminated) {
+	            		hashTask.call(hash, blobDir, chrysalis);
+	            	}
+	                return null;
+	            });
+	            futures.add(future);
+	        }
+
+	        for (Future<Void> future : futures) {
+	            try {
+	                future.get(); // this will throw if the task failed
+	            } catch (ExecutionException e) {
+	            	terminated = true;
+	                // Cancel all other tasks
+	                for (Future<Void> f : futures) {
+	                    f.cancel(true);
+	                }
+	                // Shut down and rethrow
+	                executor.shutdownNow();
+	                throw e;
+	            }
+	        }
+	    }
+	    finally {
+	        executor.shutdownNow();
+	    }
+	}
+
+	
+	public void export(Path destDir, boolean verifyBlobs) throws InterruptedException, IntegrityException, ExecutionException {
 		if(verifyBlobs) {
 			verifyBlobs();
 		}
