@@ -38,7 +38,7 @@ public class FileUtil {
 		});
 	}
 	
-	public static void moveDirectory(Path source, Path dest) throws IOException {
+	public static void copyDirectory(Path source, Path dest) throws IOException {
 		PathUtils.copyDirectory(source, dest);
 		if(PathUtils.directoryContentEquals(source, dest)) {
 			deleteDirectory(source);
@@ -47,5 +47,7 @@ public class FileUtil {
 			throw new IOException("copied directory " + source + " to " + dest + " but content not equal");
 		}
 	}
+	
+	
 	
 }
