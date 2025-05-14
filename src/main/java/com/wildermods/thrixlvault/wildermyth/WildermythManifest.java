@@ -127,6 +127,10 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		throw new MissingVersionException("Could not find manifest definition " + manifestID + " for any OS");
 	}
 	
+	public static WildermythManifest get(String version) throws MissingVersionException {
+		return get(OS.getOS(), version);
+	}
+	
 	public static WildermythManifest get(OS os, String version) throws MissingVersionException {
 		if(manifests == null) {
 			throw new IllegalStateException("Wildermyth Manifests not initialized");
