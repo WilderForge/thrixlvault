@@ -19,7 +19,6 @@ public class VerifyCurrent {
 	private static final Logger LOGGER = LogManager.getLogger();
 	
 	public static void main(String[] args) throws IntegrityException, IOException {
-		WildermythManifest.init();
 		Collection<IDownloadable> manifests = WildermythManifest.manifestStream()
 			.filter(WildermythManifest::isPublic)
 			.collect(Collectors.toList());

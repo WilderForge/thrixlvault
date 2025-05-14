@@ -18,7 +18,6 @@ public class DownloadFirstMissing {
 
 	public static void main(String[] args) throws Throwable {
 		
-		WildermythManifest.init();
 		Collection<IDownloadable> manifests = WildermythManifest.manifestStream()
 			.filter(WildermythManifest::isPublic)
 			.filter(manifest -> {return manifest.version().equals("0.6+38");})

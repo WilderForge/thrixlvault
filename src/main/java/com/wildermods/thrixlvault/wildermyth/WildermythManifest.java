@@ -138,7 +138,7 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		return new WildermythManifest(os, version, manifestID);
 	}
 	
-	public static void init() throws IntegrityException {
+	private static void init() throws IntegrityException {
 		manifests = HashBasedTable.create();
 		branches = HashMultimap.create(2, 300);
 		InputStream in = WildermythManifest.class.getResourceAsStream("/depots.json");

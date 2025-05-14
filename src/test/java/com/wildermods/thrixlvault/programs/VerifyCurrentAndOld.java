@@ -19,7 +19,6 @@ import com.wildermods.thrixlvault.wildermyth.WildermythManifest;
 public class VerifyCurrentAndOld {
 
 	public static void main(String[] args) throws IntegrityException, IOException {
-		WildermythManifest.init();
 		Collection<IDownloadable> manifests = WildermythManifest.manifestStream()
 			.filter(WildermythManifest::isPublic)
 			.collect(Collectors.toList());
