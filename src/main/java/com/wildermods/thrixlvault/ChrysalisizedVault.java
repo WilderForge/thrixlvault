@@ -61,7 +61,8 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		verifyBlobs(false);
 	}
 	
-	public void verifyBlobs(boolean failFast) throws InterruptedException, ExecutionException {
+	@Deprecated(forRemoval = true)
+	public void verifyBlobs(boolean unused) throws InterruptedException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + version);
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
