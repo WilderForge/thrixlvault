@@ -57,11 +57,11 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		return chrysalis;
 	}
 	
-	public void verifyBlobs() throws InterruptedException, IntegrityException, ExecutionException {
+	public void verifyBlobs() throws InterruptedException, ExecutionException {
 		verifyBlobs(false);
 	}
 	
-	public void verifyBlobs(boolean failFast) throws InterruptedException, IntegrityException, ExecutionException {
+	public void verifyBlobs(boolean failFast) throws InterruptedException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + version);
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
@@ -163,7 +163,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	
 	boolean terminated = false;
 	
-	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, IntegrityException, ExecutionException {
+	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, ExecutionException {
 	    Multiset<Hash> hashes = chrysalis.blobs().keys();
 	    int threads = Runtime.getRuntime().availableProcessors();
 	    ExecutorService executor = Executors.newFixedThreadPool(threads);
