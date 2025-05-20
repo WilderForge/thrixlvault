@@ -123,6 +123,7 @@ public class WeaverTests {
 			}
 		});
 		DatabaseIntegrityError e = assertThrowsExactly(DatabaseIntegrityError.class, () -> weaver.verify());
+		e.printStackTrace();
 		chrysalis.blobs().keySet().forEach((hash) -> {
 			assertTrue(
 				e.getMessage().contains("Corrupted blob - Expected hash " + hash.hash() + " but got " + corruptBlob.hash()),

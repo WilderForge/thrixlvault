@@ -1,5 +1,7 @@
 package com.wildermods.thrixlvault.exception;
 
+import com.wildermods.masshash.exception.IntegrityProblem;
+
 /**
  * Thrown to indicate a critical integrity violation in the main blob database.
  * <p>
@@ -33,7 +35,7 @@ public class DatabaseIntegrityError extends DatabaseError {
 		super(cause);
 	}
 	
-	public DatabaseIntegrityError(Throwable... problems) {
+	public DatabaseIntegrityError(IntegrityProblem... problems) {
 		super(problems);
 	}
 	
@@ -41,8 +43,12 @@ public class DatabaseIntegrityError extends DatabaseError {
 		super(message, cause);
 	}
 	
-	public DatabaseIntegrityError(String message, Throwable... problems) {
+	public DatabaseIntegrityError(String message, IntegrityProblem... problems) {
 		super(message, problems);
+	}
+	
+	public DatabaseIntegrityError(String message, Throwable cause, IntegrityProblem... problems) {
+		super(message, cause, problems);
 	}
 
 }

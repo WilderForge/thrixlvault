@@ -13,10 +13,6 @@ public class MissingResourceException extends IntegrityException {
 		super(message);
 	}
 	
-	public MissingResourceException(Throwable cause) {
-		super(cause);
-	}
-	
 	public MissingResourceException(String message, Throwable cause) {
 		super(message, cause);
 	}

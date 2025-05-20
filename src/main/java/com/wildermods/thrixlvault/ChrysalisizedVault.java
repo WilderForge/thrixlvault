@@ -26,7 +26,7 @@ import com.google.common.collect.SetMultimap;
 import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
-
+import com.wildermods.masshash.exception.IntegrityProblem;
 import com.wildermods.thrixlvault.exception.DatabaseError;
 import com.wildermods.thrixlvault.exception.DatabaseIntegrityError;
 import com.wildermods.thrixlvault.exception.DatabaseMissingBlobError;
@@ -64,7 +64,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	@Deprecated(forRemoval = true)
 	public void verifyBlobs(boolean unused) throws InterruptedException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + version);
-		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
+		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
 		computeOverBlobs((hash, vaultDir, chrysalis) -> {
 			Path blobFile = vaultDir.resolve(hash.hash());
@@ -91,7 +91,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 				else {
 					err = new DatabaseError(msg, t);
 				}
-				problems.put(hash, err);
+				problems.put(hash, () -> err.getMessage());
 			}
 		});
 
@@ -100,11 +100,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		}
 		else {
 			String message = "Database Verification Failed";
-			DatabaseIntegrityError e = new DatabaseIntegrityError(message, problems.values().toArray(new Throwable[]{}));
-			for(Throwable problem : problems.values()) {
-				if(!(problem instanceof DatabaseError) && !(problem instanceof IntegrityException))
-				e.addSuppressed(problem);
-			}
+			DatabaseIntegrityError e = new DatabaseIntegrityError(message, problems.values().toArray(new IntegrityProblem[]{}));
 			throw e;
 		}
 	}
@@ -114,7 +110,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	}
 	
 	public void verifyDirectory(Path path, boolean verifyDatabase) throws InterruptedException, IntegrityException, ExecutionException {
-		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
+		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 		
 		LOGGER.info(marker, "Verifying " + path);
 		
@@ -143,7 +139,8 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 					else {
 						t = new IntegrityException("Failed to verify resource " + localizedResource + ". Reason: " + t.getMessage() + ". (" + hash + ")", t);
 					}
-					problems.put(hash, t);
+					Throwable problem = t;
+					problems.put(hash, () -> problem.getMessage());
 				}
 			}
 		});
@@ -153,10 +150,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		}
 		else {
 			String message = "Verification Failed";
-			IntegrityException e = new IntegrityException(message, problems.values().toArray(new Throwable[]{}));
-			for(Throwable problem : problems.values()) {
-				e.addSuppressed(problem);
-			}
+			IntegrityException e = new IntegrityException(message, problems.values().toArray(new IntegrityProblem[]{}));
 			throw e;
 		}
 	}

@@ -1,5 +1,7 @@
 package com.wildermods.thrixlvault.exception;
 
+import com.wildermods.masshash.exception.IntegrityProblem;
+
 /**
  * Thrown to indicate that a required blob is missing from the main blob database.
  * <p>
@@ -23,12 +25,20 @@ public class DatabaseMissingBlobError extends DatabaseIntegrityError {
 		super(cause);
 	}
 	
+	public DatabaseMissingBlobError(IntegrityProblem... problems) {
+		super(problems);
+	}
+	
 	public DatabaseMissingBlobError(String message, Throwable cause) {
 		super(message, cause);
 	}
 	
-	public DatabaseMissingBlobError(String message, Throwable... causes) {
-		super(message, causes);
+	public DatabaseMissingBlobError(String message, IntegrityProblem... problems) {
+		super(message, problems);
+	}
+	
+	public DatabaseMissingBlobError(String message, Throwable cause, IntegrityProblem... problems) {
+		super(message, cause, problems);
 	}
 	
 }
