@@ -2,6 +2,7 @@ package com.wildermods.thrixlvault;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
@@ -22,7 +23,6 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.SetMultimap;
-
 import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
@@ -33,6 +33,7 @@ import com.wildermods.thrixlvault.exception.DatabaseIntegrityError;
 import com.wildermods.thrixlvault.exception.DatabaseMissingBlobError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
+import com.wildermods.thrixlvault.exception.UnknownVersionException;
 import com.wildermods.thrixlvault.steam.IVersioned;
 
 public class ChrysalisizedVault extends Vault implements IVersioned {
@@ -43,8 +44,8 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	final Chrysalis chrysalis;
 	final Marker marker;
 	
-	ChrysalisizedVault(IVersioned version, Vault parent) throws IOException {
-		this(version, parent, Chrysalis.fromFile(parent.getChrysalisFile(version)));
+	ChrysalisizedVault(IVersioned version, Vault parent) throws IOException, MissingVersionException {
+		this(version, parent, handleFromFile(version, parent));
 	}
 	
 	ChrysalisizedVault(IVersioned version, Vault parent, Chrysalis chrysalis) throws IOException {
@@ -214,7 +215,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 		verifyDirectory(destDir, false);
 	}
 	
-	public SetMultimap<Hash, Throwable> delete() throws IOException, MissingVersionException {
+	public SetMultimap<Hash, Throwable> delete() throws IOException, UnknownVersionException {
 		
 		Multiset<Hash> hashes = chrysalis.blobs().keys();
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
@@ -255,6 +256,15 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	@Override
 	public String version() {
 		return version.version();
+	}
+	
+	private static final Chrysalis handleFromFile(IVersioned version, Vault vault) throws IOException, MissingVersionException {
+		try {
+			return Chrysalis.fromFile(vault.getChrysalisFile(version));
+		}
+		catch(NoSuchFileException e) {
+			throw new MissingVersionException(version.toString(), e);
+		}
 	}
 	
 }

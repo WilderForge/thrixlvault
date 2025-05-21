@@ -36,7 +36,7 @@ import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.DatabaseIntegrityError;
-import com.wildermods.thrixlvault.exception.MissingVersionException;
+import com.wildermods.thrixlvault.exception.UnknownVersionException;
 import com.wildermods.thrixlvault.utils.OS;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -193,7 +193,7 @@ public class WeaverTests {
 	
 	@Test
 	@Order(12)
-	void deserializeManifestTest() throws JsonSyntaxException, JsonIOException, IOException, MissingVersionException {
+	void deserializeManifestTest() throws JsonSyntaxException, JsonIOException, IOException, UnknownVersionException {
 		weaver.getChrysalisizedVault().version();
 		
 		Path manifest = weaver.getChrysalisizedVault().getChrysalisFile();

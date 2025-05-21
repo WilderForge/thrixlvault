@@ -23,7 +23,7 @@ import com.google.gson.JsonParser;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.DatabaseError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
-import com.wildermods.thrixlvault.exception.MissingVersionException;
+import com.wildermods.thrixlvault.exception.UnknownVersionException;
 import com.wildermods.thrixlvault.steam.IDownloadable;
 import com.wildermods.thrixlvault.steam.INamed;
 import com.wildermods.thrixlvault.steam.IVersioned;
@@ -111,7 +111,7 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	@Deprecated
-	public static WildermythManifest get(long manifestID) throws MissingVersionException {
+	public static WildermythManifest get(long manifestID) throws UnknownVersionException {
 		if(manifests == null) {
 			throw new IllegalStateException("Wildermyth Manifests not initialized!");
 		}
@@ -124,20 +124,20 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 			Cell<OS, String, Long> definition = cells.iterator().next();
 			return new WildermythManifest(definition.getRowKey(), definition.getColumnKey(), definition.getValue()); //return the version with the least suffixes (in the case of 1.0r1 and 1.0, 1.0 would be returned)
 		}
-		throw new MissingVersionException("Could not find manifest definition " + manifestID + " for any OS");
+		throw new UnknownVersionException("Could not find manifest definition " + manifestID + " for any OS");
 	}
 	
-	public static WildermythManifest get(String version) throws MissingVersionException {
+	public static WildermythManifest get(String version) throws UnknownVersionException {
 		return get(OS.getOS(), version);
 	}
 	
-	public static WildermythManifest get(OS os, String version) throws MissingVersionException {
+	public static WildermythManifest get(OS os, String version) throws UnknownVersionException {
 		if(manifests == null) {
 			throw new IllegalStateException("Wildermyth Manifests not initialized");
 		}
 		Long manifestID = manifests.get(os, version);
 		if(manifestID == null) {
-			throw new MissingVersionException("Could not find version " + version + " for OS " + os);
+			throw new UnknownVersionException("Could not find version " + version + " for OS " + os);
 		}
 		return new WildermythManifest(os, version, manifestID);
 	}

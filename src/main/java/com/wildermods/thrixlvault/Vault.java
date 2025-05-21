@@ -8,6 +8,7 @@ import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
+import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.steam.IVersioned;
 import com.wildermods.thrixlvault.utils.OS;
 
@@ -47,7 +48,7 @@ public class Vault {
 		Files.createDirectories(this.blobDir);
 	}
 	
-	public ChrysalisizedVault chrysalisize(IVersioned version) throws IOException {
+	public ChrysalisizedVault chrysalisize(IVersioned version) throws IOException, MissingVersionException {
 		return new ChrysalisizedVault(version, this);
 	}
 	
