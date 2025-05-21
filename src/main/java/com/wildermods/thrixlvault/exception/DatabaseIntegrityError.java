@@ -50,6 +50,19 @@ public class DatabaseIntegrityError extends DatabaseError {
 	public DatabaseIntegrityError(String message, Throwable cause, IntegrityProblem... problems) {
 		super(message, cause, problems);
 	}
+	
+	@Override
+	public DatabaseIntegrityProblem toProblem() {
+		return new DatabaseIntegrityProblem(this);
+	}
+	
+	public static class DatabaseIntegrityProblem extends DatabaseProblem {
 
+		protected DatabaseIntegrityProblem(DatabaseIntegrityError e) {
+			super(e);
+		}
+		
+	}
+	
 }
 

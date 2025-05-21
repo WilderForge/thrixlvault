@@ -128,6 +128,10 @@ public class DatabaseError extends Error {
 		return Arrays.stream(problems);
 	}
 	
+	public IntegrityProblem toProblem() {
+		return new DatabaseProblem(this);
+	}
+	
 	private static IntegrityProblem[] computeProblems(IntegrityProblem... problems) {
 		if(problems == null) {
 			return problems = new IntegrityProblem[]{};
@@ -187,5 +191,34 @@ public class DatabaseError extends Error {
 		
 		return ret.toString();
 	}
+	
+	public static class DatabaseProblem implements IntegrityProblem {
 
+		private final String message;
+		
+		protected DatabaseProblem(DatabaseError e) {
+			this.message = e.getMessage();
+		}
+		
+		private DatabaseProblem(IntegrityProblem p) {
+			this.message = p.getMessage();
+		}
+		
+		@Override
+		public String getMessage() {
+			return message;
+		}
+		
+		
+		public static DatabaseProblem fromThrown(Throwable t) {
+			if(t instanceof DatabaseError) {
+				return ((DatabaseIntegrityError) t).toProblem();
+			}
+			return new DatabaseProblem(() -> {
+				String message = t.getMessage();
+				return message == null || message.isBlank() ? t.getClass().getName() : message;
+			});
+		}
+		
+	}
 }

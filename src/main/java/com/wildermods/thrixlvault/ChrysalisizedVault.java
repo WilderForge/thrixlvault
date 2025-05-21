@@ -28,6 +28,7 @@ import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.masshash.exception.IntegrityProblem;
 import com.wildermods.thrixlvault.exception.DatabaseError;
+import com.wildermods.thrixlvault.exception.DatabaseError.DatabaseProblem;
 import com.wildermods.thrixlvault.exception.DatabaseIntegrityError;
 import com.wildermods.thrixlvault.exception.DatabaseMissingBlobError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
@@ -91,7 +92,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 				else {
 					err = new DatabaseError(msg, t);
 				}
-				problems.put(hash, () -> err.getMessage());
+				problems.put(hash, DatabaseProblem.fromThrown(err));
 			}
 		});
 
@@ -139,8 +140,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 					else {
 						t = new IntegrityException("Failed to verify resource " + localizedResource + ". Reason: " + t.getMessage() + ". (" + hash + ")", t);
 					}
-					Throwable problem = t;
-					problems.put(hash, () -> problem.getMessage());
+					problems.put(hash, IntegrityProblem.fromThrown(t));
 				}
 			}
 		});

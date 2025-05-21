@@ -1,9 +1,7 @@
 package com.wildermods.thrixlvault.exception;
 
-import com.wildermods.masshash.exception.IntegrityProblem;
-
 @SuppressWarnings("serial")
-public class MissingVersionException extends MissingResourceException implements IntegrityProblem {
+public class MissingVersionException extends MissingResourceException {
 	
 	public MissingVersionException() {
 		super();
@@ -15,6 +13,19 @@ public class MissingVersionException extends MissingResourceException implements
 	
 	public MissingVersionException(String message, Throwable cause) {
 		super(message, cause);
+	}
+	
+	@Override
+	public MissingVersionProblem toProblem() {
+		return new MissingVersionProblem(this);
+	}
+	
+	public static class MissingVersionProblem extends MissingResourceProblem {
+		
+		private MissingVersionProblem(MissingVersionException e) {
+			super(e);
+		}
+		
 	}
 
 }

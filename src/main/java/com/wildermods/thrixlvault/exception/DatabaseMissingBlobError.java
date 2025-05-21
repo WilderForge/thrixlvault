@@ -41,4 +41,17 @@ public class DatabaseMissingBlobError extends DatabaseIntegrityError {
 		super(message, cause, problems);
 	}
 	
+	@Override
+	public DatabaseMissingBlobProblem toProblem() {
+		return new DatabaseMissingBlobProblem(this);
+	}
+	
+	public class DatabaseMissingBlobProblem extends DatabaseIntegrityProblem {
+
+		protected DatabaseMissingBlobProblem(DatabaseMissingBlobError e) {
+			super(e);
+		}
+		
+	}
+	
 }
