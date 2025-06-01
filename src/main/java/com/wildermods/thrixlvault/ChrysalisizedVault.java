@@ -34,25 +34,25 @@ import com.wildermods.thrixlvault.exception.DatabaseMissingBlobError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
-import com.wildermods.thrixlvault.steam.IVersioned;
+import com.wildermods.thrixlvault.steam.IVaultable;
 
-public class ChrysalisizedVault extends Vault implements IVersioned {
+public class ChrysalisizedVault extends Vault implements IVaultable {
 
 	static final Logger LOGGER = LogManager.getLogger();
 	
-	final IVersioned version;
+	final IVaultable artifact;
 	final Chrysalis chrysalis;
 	final Marker marker;
 	
-	ChrysalisizedVault(IVersioned version, Vault parent) throws IOException, MissingVersionException {
-		this(version, parent, handleFromFile(version, parent));
+	ChrysalisizedVault(IVaultable artifact, Vault parent) throws IOException, MissingVersionException {
+		this(artifact, parent, handleFromFile(artifact, parent));
 	}
 	
-	ChrysalisizedVault(IVersioned version, Vault parent, Chrysalis chrysalis) throws IOException {
-		super(parent.vaultDir, parent.versionDir);
+	ChrysalisizedVault(IVaultable artifact, Vault parent, Chrysalis chrysalis) throws IOException {
+		super(parent.vaultDir);
 		this.chrysalis = chrysalis;
-		this.version = version;
-		this.marker = MarkerManager.getMarker(version());
+		this.artifact = artifact;
+		this.marker = MarkerManager.getMarker(artifact.name());
 	}
 
 	public Chrysalis getChrysalis() {
@@ -65,7 +65,7 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	
 	@Deprecated(forRemoval = true)
 	public void verifyBlobs(boolean unused) throws InterruptedException, ExecutionException {
-		LOGGER.info(marker, "Verifying " + version);
+		LOGGER.info(marker, "Verifying " + artifact);
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
 		computeOverBlobs((hash, vaultDir, chrysalis) -> {
@@ -252,19 +252,28 @@ public class ChrysalisizedVault extends Vault implements IVersioned {
 	public Path getChrysalisFile() {
 		return getChrysalisFile(this);
 	}
-
-	@Override
-	public String version() {
-		return version.version();
-	}
 	
-	private static final Chrysalis handleFromFile(IVersioned version, Vault vault) throws IOException, MissingVersionException {
+	private static final Chrysalis handleFromFile(IVaultable version, Vault vault) throws IOException, MissingVersionException {
 		try {
 			return Chrysalis.fromFile(vault.getChrysalisFile(version));
 		}
 		catch(NoSuchFileException e) {
 			throw new MissingVersionException(version.toString(), e);
 		}
+	}
+	
+	public IVaultable getArtifact() {
+		return artifact;
+	}
+
+	@Override
+	public String name() {
+		return artifact.name();
+	}
+
+	@Override
+	public Path artifactPath() {
+		return artifact.artifactPath();
 	}
 	
 }

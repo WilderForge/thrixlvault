@@ -13,7 +13,6 @@ import com.wildermods.thrixlvault.steam.FailedDownload;
 import com.wildermods.thrixlvault.steam.IDownload;
 import com.wildermods.thrixlvault.steam.IDownloadable;
 import com.wildermods.thrixlvault.utils.FileUtil;
-import com.wildermods.thrixlvault.utils.OS;
 
 public class MassDownloadWeaver {
 	
@@ -36,7 +35,7 @@ public class MassDownloadWeaver {
 			Set<IDownload> downloads = downloader.run((download) -> {
 				if(download instanceof CompletedDownload) {
 					try {
-						Weaver weaver = new Weaver(new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(download)), download);
+						Weaver weaver = new Weaver(Vault.DEFAULT, download);
 					} catch (IOException | IntegrityException e) {
 						throw new RuntimeException(e);
 					}

@@ -6,9 +6,6 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import com.wildermods.thrixlvault.ChrysalisizedVault;
-import com.wildermods.thrixlvault.MassDownloadWeaver;
-import com.wildermods.thrixlvault.Vault;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
 import com.wildermods.thrixlvault.steam.IDownloadable;
 import com.wildermods.thrixlvault.utils.OS;
@@ -26,7 +23,7 @@ public class DownloadFirstMissing {
 		ArrayList<IDownloadable> toDownload = new ArrayList<IDownloadable>();
 		for(IDownloadable manifest : manifests) {
 			try {
-				Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(manifest));
+				Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 				Path chrysalisFile = vault.getChrysalisFile(manifest);
 				ChrysalisizedVault cVault = vault.chrysalisize(manifest);
 				cVault.verifyBlobs();
@@ -48,7 +45,7 @@ public class DownloadFirstMissing {
 		downloader.run();
 		
 		for(IDownloadable manifest : manifests) {
-			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(manifest));
+			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 			String header = "========Verifying " + manifest.name() + "========";
 			System.out.println(header);
 			Path chrysalisFile = vault.getChrysalisFile(manifest);

@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.LinkedHashSet;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -73,6 +74,11 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	
 	public boolean isWindows() {
 		return os == OS.WINDOWS;
+	}
+	
+	@Override
+	public Path artifactPath() {
+		return Path.of(GAME_NAME).resolve(os().name()).resolve(version());
 	}
 	
 	public boolean isPublic() {

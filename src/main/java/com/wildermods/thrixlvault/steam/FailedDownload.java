@@ -18,6 +18,11 @@ public record FailedDownload(IDownloadable download, Path dest, Throwable failRe
 	public long depot() {
 		return download.depot();
 	}
+	
+	@Override
+	public Path artifactPath() {
+		return download.artifactPath();
+	}
 
 	@Override
 	public boolean equals(Object o) {

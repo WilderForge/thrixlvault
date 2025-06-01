@@ -37,13 +37,26 @@ import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.DatabaseIntegrityError;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
+import com.wildermods.thrixlvault.steam.IVaultable;
 import com.wildermods.thrixlvault.utils.OS;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class WeaverTests {
 
-	static final String VERSION = "thrixlVaultTest";
+	static final IVaultable VERSION = new IVaultable() {
+
+		@Override
+		public String name() {
+			return "thrixlVaultTest";
+		}
+
+		@Override
+		public Path artifactPath() {
+			return Path.of("thrixlVaultTest");
+		}
+		
+	};
 	static Path sourceDir = Paths.get("./src", "test", "resources");
 	
 
@@ -194,7 +207,7 @@ public class WeaverTests {
 	@Test
 	@Order(12)
 	void deserializeManifestTest() throws JsonSyntaxException, JsonIOException, IOException, UnknownVersionException {
-		weaver.getChrysalisizedVault().version();
+		weaver.getChrysalisizedVault();
 		
 		Path manifest = weaver.getChrysalisizedVault().getChrysalisFile();
 		System.out.println(manifest);
@@ -217,13 +230,13 @@ public class WeaverTests {
 	void osAssertions() throws IOException, IntegrityException {
 		
 		System.out.println("Weaving linux");
-		Weaver linux = new Weaver(new Vault(vaultDir, OS.LINUX), VERSION, sourceDir);
+		Weaver linux = new Weaver(new Vault(vaultDir.resolve(OS.LINUX.name())), VERSION, sourceDir);
 		
 		System.out.println("Weaving windows");
-		Weaver windows = new Weaver(new Vault(vaultDir, OS.WINDOWS), VERSION, sourceDir);
+		Weaver windows = new Weaver(new Vault(vaultDir.resolve(OS.WINDOWS.name())), VERSION, sourceDir);
 		
 		System.out.println("Weaving mac");
-		Weaver mac = new Weaver(new Vault(vaultDir, OS.MAC), VERSION, sourceDir);
+		Weaver mac = new Weaver(new Vault(vaultDir.resolve(OS.MAC.name())), VERSION, sourceDir);
 		
 		String jCurrent = Weaver.GSON.toJson(chrysalis);
 		

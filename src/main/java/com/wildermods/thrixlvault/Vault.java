@@ -9,8 +9,7 @@ import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
-import com.wildermods.thrixlvault.steam.IVersioned;
-import com.wildermods.thrixlvault.utils.OS;
+import com.wildermods.thrixlvault.steam.IVaultable;
 
 public class Vault {
 
@@ -21,43 +20,29 @@ public class Vault {
 	static {
 		try {
 			DEFAULT = new Vault(DEFAULT_VAULT_DIR);
-		} catch (IOException e) {
-			throw new Error(e);
+		}
+		catch(Throwable t) {
+			throw new ExceptionInInitializerError(t);
 		}
 	}
 	
 	public final Path vaultDir;
-	public final Path versionDir;
 	public final Path blobDir;
 	
 	public Vault(Path vaultDir) throws IOException {
-		this(vaultDir, OS.getOS());
-	}
-	
-	public Vault(Path vaultDir, OS os) throws IOException {
-		this(vaultDir, vaultDir.resolve(os.name()));
-	}
-	
-	public Vault(Path vaultDir, Path versionDir) throws IOException {
 		this.vaultDir = vaultDir;
-		this.versionDir = versionDir;
 		this.blobDir = vaultDir.resolve("blobs");
 		
 		Files.createDirectories(this.vaultDir);
-		Files.createDirectories(this.versionDir);
 		Files.createDirectories(this.blobDir);
 	}
 	
-	public ChrysalisizedVault chrysalisize(IVersioned version) throws IOException, MissingVersionException {
+	public ChrysalisizedVault chrysalisize(IVaultable version) throws IOException, MissingVersionException {
 		return new ChrysalisizedVault(version, this);
 	}
 	
 	public Path getVaultDir() {
 		return vaultDir;
-	}
-	
-	public Path getVersionDir() {
-		return versionDir;
 	}
 	
 	public Path getBlobDir() {
@@ -76,12 +61,12 @@ public class Vault {
 		throw new MissingResourceException(path.toString());
 	}
 	
-	public boolean hasChrysalis(IVersioned versioned) {
-		return Files.exists(getChrysalisFile(versioned));
+	public boolean hasChrysalis(IVaultable artifact) {
+		return Files.exists(getChrysalisFile(artifact));
 	}
 
-	public Path getChrysalisFile(IVersioned versioned) {
-		return versionDir.resolve(versioned.version()).resolve("blobs.json");
+	public Path getChrysalisFile(IVaultable artifact) {
+		return vaultDir.resolve(artifact.artifactPath()).resolve("blobs.json");
 	}
 	
 	public Path getBlobFile(Hash hash) {
