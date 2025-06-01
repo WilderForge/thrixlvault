@@ -21,7 +21,7 @@ import com.google.gson.GsonBuilder;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.VersionAlreadyWeavedException;
 import com.wildermods.thrixlvault.steam.IDownload;
-import com.wildermods.thrixlvault.steam.IVersioned;
+import com.wildermods.thrixlvault.steam.IVaultable;
 
 
 /**
@@ -37,7 +37,7 @@ import com.wildermods.thrixlvault.steam.IVersioned;
  * This class is designed to ensure blob integrity and can validate that all blobs referenced
  * in a manifest exist and are unmodified.
  */
-public class Weaver implements IVersioned {
+public class Weaver implements IVaultable {
 	
 	/** Gson instance for serializing Chrysalis manifests. */
 	public static final Gson GSON;
@@ -57,7 +57,7 @@ public class Weaver implements IVersioned {
 	private static final Logger LOGGER = LogManager.getLogger();
 	
 	private final ChrysalisizedVault vault;
-	private final IVersioned version;
+	private final IVaultable artifact;
 	private final Marker marker;
 	
     /**
@@ -69,8 +69,8 @@ public class Weaver implements IVersioned {
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if an integrity violation occurs
      */
-	public Weaver(Vault vault, String version, Path sourcesDir) throws IOException, IntegrityException {
-		this(vault, version, sourcesDir, false);
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir) throws IOException, IntegrityException {
+		this(vault, artifact, sourcesDir, false);
 	}
 	
 
@@ -84,48 +84,14 @@ public class Weaver implements IVersioned {
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if an integrity violation occurs
      */
-	public Weaver(Vault vault, String version, Path sourcesDir, boolean force) throws IOException, IntegrityException {
-		this.version = () -> version;
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, boolean force) throws IOException, IntegrityException {
+		this.artifact = artifact;
 		this.vault = weave(sourcesDir, vault, force);
-		this.marker = MarkerManager.getMarker(version);
+		this.marker = MarkerManager.getMarker(artifact.name());
 	}
 	
-    /**
-     * Constructs a new {@code Weaver} using a {@link IVersioned} version provider.
-     *
-     * @param vault the vault to weave into
-     * @param versioned the version
-     * @param sourcesDir the directory to scan for files
-     * @throws IOException if an I/O error occurs
-     * @throws IntegrityException if an integrity violation occurs
-     */
-	public Weaver(Vault vault, IVersioned versioned, Path sourcesDir) throws IOException, IntegrityException {
-		this(vault, versioned.version(), sourcesDir);
-	}
-	
-	
-	/**
-	 * Constructs a new {@code Weaver} using an {@link IDownload} to obtain the version and source directory.
-	 * Utilizes the version and destination directory provided by the {@code IDownload} instance
-	 * to weave the download into the vault.
-	 *
-	 * @param vault the vault to weave into
-	 * @param download the {@link IDownload} instance providing the version and location of the source files
-	 * @throws IOException if an I/O error occurs
-	 * @throws IntegrityException if an integrity violation occurs
-	*/
 	public Weaver(Vault vault, IDownload download) throws IOException, IntegrityException {
-	    this(vault, download.version(), download.dest());
-	}
-	
-    /**
-     * Gets the version associated with this weaving operation.
-     *
-     * @return the version string
-     */
-	@Override
-	public String version() {
-		return version.version();
+		 this(vault, download, download.dest());
 	}
 	
     /**
@@ -167,7 +133,7 @@ public class Weaver implements IVersioned {
      */
 	private ChrysalisizedVault weave(Path sourceDir, Vault vault, boolean force) throws IOException, IntegrityException {
 		if(!force && Files.exists(vault.getChrysalisFile(this))) {
-			throw new VersionAlreadyWeavedException(version.version() + " in " + vault.getChrysalisFile(this));
+			throw new VersionAlreadyWeavedException(artifact.name() + " in " + vault.getChrysalisFile(this));
 		}
 		
 		AtomicLong preExistingBlobs = new AtomicLong();
@@ -226,6 +192,22 @@ public class Weaver implements IVersioned {
 		}
 		
 		return vault.chrysalisize(this);
+	}
+
+
+	@Override
+	public String name() {
+		return artifact.name();
+	}
+
+
+	@Override
+	public Path artifactPath() {
+		return artifact.artifactPath();
+	}
+	
+	public IVaultable getArtifact() {
+		return artifact;
 	}
 	
 }

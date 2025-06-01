@@ -11,7 +11,6 @@ import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.ChrysalisizedVault;
 import com.wildermods.thrixlvault.Vault;
 import com.wildermods.thrixlvault.steam.IDownloadable;
-import com.wildermods.thrixlvault.utils.OS;
 import com.wildermods.thrixlvault.wildermyth.WildermythManifest;
 
 public class VerifyCurrent {
@@ -25,7 +24,7 @@ public class VerifyCurrent {
 		
 		for(IDownloadable manifest : manifests) {
 			try {
-				Vault currentVault = new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(manifest));
+				Vault currentVault = new Vault(Vault.DEFAULT_VAULT_DIR);
 				
 				LOGGER.info("=====================" + manifest + "=====================");
 				ChrysalisizedVault currentManifest = currentVault.chrysalisize(manifest);

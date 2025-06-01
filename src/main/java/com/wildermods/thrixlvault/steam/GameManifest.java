@@ -1,5 +1,7 @@
 package com.wildermods.thrixlvault.steam;
 
+import java.nio.file.Path;
+
 public record GameManifest(long game, long depot, long manifest) implements IDownloadable {
 
 	public String toString() {
@@ -17,6 +19,11 @@ public record GameManifest(long game, long depot, long manifest) implements IDow
 	@Override
 	public int hashCode() {
 		return IDownloadable.hashCode(this);
+	}
+
+	@Override
+	public Path artifactPath() {
+		return Path.of(game + "").resolve(depot + "").resolve(manifest + "");
 	}
 	
 }

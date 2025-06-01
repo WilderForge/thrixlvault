@@ -23,6 +23,11 @@ public record CompletedDownload(IDownloadable download, Path dest) implements ID
 	public String version() {
 		return download.version();
 	}
+
+	@Override
+	public Path artifactPath() {
+		return download.artifactPath();
+	}
 	
 	@Override
 	public String name() {

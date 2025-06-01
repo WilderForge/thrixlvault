@@ -3,7 +3,7 @@ package com.wildermods.thrixlvault.steam;
 import java.nio.file.Path;
 import java.util.Objects;
 
-public interface IDownloadable extends IGame, IManifest, IDepot, INamed {
+public interface IDownloadable extends INamed, IGame, IDepot, IManifest, IVaultable {
 	
 	public default String name() {
 		return manifest() + "";

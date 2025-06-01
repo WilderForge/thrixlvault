@@ -23,7 +23,7 @@ public class DownloadAllMissing {
 		ArrayList<IDownloadable> toDownload = new ArrayList<IDownloadable>();
 		for(IDownloadable manifest : manifests) {
 			try {
-				Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(manifest));
+				Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 				ChrysalisizedVault cVault = vault.chrysalisize(manifest);
 				cVault.verifyBlobs();
 			}
@@ -39,7 +39,7 @@ public class DownloadAllMissing {
 		downloader.run();
 		
 		for(IDownloadable manifest : manifests) {
-			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR, OS.fromDepot(manifest));
+			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 			String header = "========Verifying " + manifest.name() + "========";
 			System.out.println(header);
 			ChrysalisizedVault cVault = vault.chrysalisize(manifest);
