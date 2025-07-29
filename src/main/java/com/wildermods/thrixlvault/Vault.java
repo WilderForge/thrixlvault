@@ -41,6 +41,10 @@ public class Vault {
 		return new ChrysalisizedVault(version, this);
 	}
 	
+	public ChrysalisizedVault chrysalisize(IVaultable version, Chrysalis chrysalis) throws IOException {
+		return new ChrysalisizedVault(version, this, chrysalis);
+	}
+	
 	public Path getVaultDir() {
 		return vaultDir;
 	}

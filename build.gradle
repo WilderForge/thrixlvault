@@ -12,6 +12,7 @@ apply from: 'replaceTokenScript.gradle'
 apply from: 'publishScript.gradle'
 
 repositories {
+	mavenLocal()
 	mavenCentral()
     maven {
         url "https://maven.wildermods.com/"
@@ -26,6 +27,7 @@ dependencies {
 	implementation (libs.guava)
 	implementation (libs.log4j)
 	api (libs.masshash)
+	api (libs.maven.fetcher)
 
 	// Use JUnit Jupiter for testing.
 	testImplementation (libs.junit)
