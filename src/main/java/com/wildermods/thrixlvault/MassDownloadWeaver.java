@@ -10,19 +10,19 @@ import java.util.Set;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.steam.CompletedDownload;
 import com.wildermods.thrixlvault.steam.FailedDownload;
-import com.wildermods.thrixlvault.steam.IDownload;
-import com.wildermods.thrixlvault.steam.IDownloadable;
+import com.wildermods.thrixlvault.steam.ISteamDownload;
+import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.utils.FileUtil;
 
 public class MassDownloadWeaver {
 	
 	final String username;
 	final int totalDownloads;
-	final LinkedHashSet<IDownloadable> downloadables;
-	final HashMap<IDownloadable, Integer> failedDownloads = new HashMap<>();
-	final HashSet<IDownload> finishedDownloads = new HashSet<IDownload>();
+	final LinkedHashSet<ISteamDownloadable> downloadables;
+	final HashMap<ISteamDownloadable, Integer> failedDownloads = new HashMap<>();
+	final HashSet<ISteamDownload> finishedDownloads = new HashSet<ISteamDownload>();
 	
-	public MassDownloadWeaver(String username, Collection<IDownloadable> downloadable) throws IOException, InterruptedException {
+	public MassDownloadWeaver(String username, Collection<ISteamDownloadable> downloadable) throws IOException, InterruptedException {
 		this.username = username;
 		totalDownloads = downloadable.size();
 		downloadables = new LinkedHashSet<>(downloadable);
@@ -32,7 +32,7 @@ public class MassDownloadWeaver {
 		while(!downloadables.isEmpty()) {
 			
 			SteamDownloader downloader = new SteamDownloader(username, downloadables);
-			Set<IDownload> downloads = downloader.run((download) -> {
+			Set<ISteamDownload> downloads = downloader.run((download) -> {
 				if(download instanceof CompletedDownload) {
 					try {
 						Weaver weaver = new Weaver(Vault.DEFAULT, download);
@@ -46,7 +46,7 @@ public class MassDownloadWeaver {
 					throw new RuntimeException(e);
 				}
 			});
-			for(IDownload download : downloads) {
+			for(ISteamDownload download : downloads) {
 				if(download instanceof FailedDownload) {
 					final int attempt;
 					if(!failedDownloads.containsKey(download)) {
@@ -77,7 +77,7 @@ public class MassDownloadWeaver {
 		int success = 0;
 		int other = 0;
 		final int remaining = downloadables.size();
-		for(IDownload download : finishedDownloads) {
+		for(ISteamDownload download : finishedDownloads) {
 			if(download instanceof CompletedDownload) {
 				success++;
 			}

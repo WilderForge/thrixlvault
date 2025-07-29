@@ -10,7 +10,7 @@ import com.wildermods.thrixlvault.ChrysalisizedVault;
 import com.wildermods.thrixlvault.MassDownloadWeaver;
 import com.wildermods.thrixlvault.Vault;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
-import com.wildermods.thrixlvault.steam.IDownloadable;
+import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.utils.OS;
 import com.wildermods.thrixlvault.wildermyth.WildermythManifest;
 
@@ -18,13 +18,13 @@ public class DownloadFirstMissing {
 
 	public static void main(String[] args) throws Throwable {
 		
-		Collection<IDownloadable> manifests = WildermythManifest.manifestStream()
+		Collection<ISteamDownloadable> manifests = WildermythManifest.manifestStream()
 			.filter(WildermythManifest::isPublic)
 			.filter(manifest -> {return manifest.version().equals("0.6+38");})
 			.collect(Collectors.toList());
 		
-		ArrayList<IDownloadable> toDownload = new ArrayList<IDownloadable>();
-		for(IDownloadable manifest : manifests) {
+		ArrayList<ISteamDownloadable> toDownload = new ArrayList<>();
+		for(ISteamDownloadable manifest : manifests) {
 			try {
 				Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 				Path chrysalisFile = vault.getChrysalisFile(manifest);
@@ -47,7 +47,7 @@ public class DownloadFirstMissing {
 		MassDownloadWeaver downloader = new MassDownloadWeaver("wilderforge", manifests);
 		downloader.run();
 		
-		for(IDownloadable manifest : manifests) {
+		for(ISteamDownloadable manifest : manifests) {
 			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 			String header = "========Verifying " + manifest.name() + "========";
 			System.out.println(header);

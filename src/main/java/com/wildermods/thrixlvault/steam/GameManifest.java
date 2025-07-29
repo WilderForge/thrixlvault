@@ -2,7 +2,7 @@ package com.wildermods.thrixlvault.steam;
 
 import java.nio.file.Path;
 
-public record GameManifest(long game, long depot, long manifest) implements IDownloadable {
+public record GameManifest(long game, long depot, long manifest) implements ISteamDownloadable {
 
 	public String toString() {
 		return game() + " " + depot() + " " + manifest();
@@ -10,15 +10,15 @@ public record GameManifest(long game, long depot, long manifest) implements IDow
 	
 	@Override
 	public boolean equals(Object o) {
-		if(o instanceof IDownloadable) {
-			return IDownloadable.isEqual(this, (IDownloadable) o);
+		if(o instanceof ISteamDownloadable) {
+			return ISteamDownloadable.isEqual(this, (ISteamDownloadable) o);
 		}
 		return false;
 	}
 	
 	@Override
 	public int hashCode() {
-		return IDownloadable.hashCode(this);
+		return ISteamDownloadable.hashCode(this);
 	}
 
 	@Override

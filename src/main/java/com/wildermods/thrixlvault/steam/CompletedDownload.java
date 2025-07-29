@@ -2,7 +2,7 @@ package com.wildermods.thrixlvault.steam;
 
 import java.nio.file.Path;
 
-public record CompletedDownload(IDownloadable download, Path dest) implements IDownload {
+public record CompletedDownload(ISteamDownloadable download, Path dest) implements ISteamDownload {
 
 	@Override
 	public long game() {
@@ -36,15 +36,15 @@ public record CompletedDownload(IDownloadable download, Path dest) implements ID
 	
 	@Override
 	public boolean equals(Object o) {
-		if(o instanceof IDownloadable) {
-			return IDownloadable.isEqual(this, (IDownloadable) o);
+		if(o instanceof ISteamDownloadable) {
+			return ISteamDownloadable.isEqual(this, (ISteamDownloadable) o);
 		}
 		return false;
 	}
 	
 	@Override
 	public int hashCode() {
-		return IDownloadable.hashCode(this);
+		return ISteamDownloadable.hashCode(this);
 	}
 
 }

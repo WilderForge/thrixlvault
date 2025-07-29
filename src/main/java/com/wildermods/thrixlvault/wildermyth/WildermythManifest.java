@@ -25,12 +25,12 @@ import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.DatabaseError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
-import com.wildermods.thrixlvault.steam.IDownloadable;
 import com.wildermods.thrixlvault.steam.INamed;
+import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.steam.IVersioned;
 import com.wildermods.thrixlvault.utils.OS;
 
-public record WildermythManifest(OS os, String version, long manifest) implements IDownloadable, IVersioned, INamed {
+public record WildermythManifest(OS os, String version, long manifest) implements ISteamDownloadable, IVersioned, INamed {
 
 	static {
 		try {
@@ -98,14 +98,14 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	public boolean equals(Object o) {
-		if(o instanceof IDownloadable) {
-			return IDownloadable.isEqual(this, (IDownloadable) o);
+		if(o instanceof ISteamDownloadable) {
+			return ISteamDownloadable.isEqual(this, (ISteamDownloadable) o);
 		}
 		return false;
 	}
 	
 	public int hashCode() {
-		return IDownloadable.hashCode(this);
+		return ISteamDownloadable.hashCode(this);
 	}
 	
 	public static Set<WildermythManifest> getManifests() {

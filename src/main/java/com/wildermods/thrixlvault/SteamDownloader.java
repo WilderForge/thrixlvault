@@ -23,9 +23,9 @@ import javax.security.sasl.AuthenticationException;
 
 import com.wildermods.thrixlvault.steam.CompletedDownload;
 import com.wildermods.thrixlvault.steam.FailedDownload;
-import com.wildermods.thrixlvault.steam.IDownload;
-import com.wildermods.thrixlvault.steam.IDownloadable;
 import com.wildermods.thrixlvault.steam.IManifest;
+import com.wildermods.thrixlvault.steam.ISteamDownload;
+import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.utils.FileUtil;
 
 import static com.wildermods.thrixlvault.SteamDownloader.SteamState.*;
@@ -37,8 +37,8 @@ public class SteamDownloader {
 	public static final Path DEFAULT_APP_INSTALL_DIR = Path.of(System.getProperty("user.home")).resolve("thrixlvault").resolve("current_download");
 	private final Path installDir;
 	private final String username;
-	private final Collection<IDownloadable> downloadables;
-	private final HashMap<IManifest, IDownload> processedDownloads = new HashMap<IManifest, IDownload>();
+	private final Collection<ISteamDownloadable> downloadables;
+	private final HashMap<IManifest, ISteamDownload> processedDownloads = new HashMap<IManifest, ISteamDownload>();
 
 	private volatile Process process;
 	private volatile SteamState prevState = SteamState.UNINITIALIZED;
@@ -49,38 +49,38 @@ public class SteamDownloader {
 	private final Object interruptLock = new Object();
 	private volatile boolean interrupt = false;;
 	
-	private volatile IDownloadable currentDownload;
+	private volatile ISteamDownloadable currentDownload;
 
 	private static final Pattern ERROR_REGEX = Pattern.compile("ERROR \\((?<error>.*)\\)\\n");
 
-	public SteamDownloader(String username, Collection<IDownloadable> downloads) {
+	public SteamDownloader(String username, Collection<ISteamDownloadable> downloads) {
 		this.username = username;
 		this.downloadables = downloads;
 		this.installDir = DEFAULT_APP_INSTALL_DIR;
 	}
 	
-	public SteamDownloader(String username, Collection<IDownloadable> downloads, Path installDir) {
+	public SteamDownloader(String username, Collection<ISteamDownloadable> downloads, Path installDir) {
 		this.username = username;
 		this.downloadables = downloads;
 		this.installDir = installDir;
 	}
 	
-	public Set<IDownload> run() throws Throwable {
+	public Set<ISteamDownload> run() throws Throwable {
 		return run((c) -> {});
 	}
 	
-	public Set<IDownload> run(Consumer<IDownload> onManifestDownload) throws IOException, InterruptedException {
+	public Set<ISteamDownload> run(Consumer<ISteamDownload> onManifestDownload) throws IOException, InterruptedException {
 		return run(onManifestDownload, Duration.ofSeconds(30), Duration.ofMinutes(7));
 	}
 
-	public Set<IDownload> run(Consumer<IDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException, InterruptedException {
+	public Set<ISteamDownload> run(Consumer<ISteamDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException, InterruptedException {
 		synchronized (GLOBAL_RUN_LOCK) {
 			System.out.println("[DOWNLOADER] Acquired global run lock");
 			return this.runInternal(onManifestDownload, hangTimeout, downloadTimeout);
 		}
 	}
 
-	private Set<IDownload> runInternal(Consumer<IDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException {
+	private Set<ISteamDownload> runInternal(Consumer<ISteamDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException {
 		ProcessBuilder processBuilder = new ProcessBuilder("steamcmd");
 		processBuilder.redirectErrorStream(true); // Merge stdout and stderr
 		process = processBuilder.start();
@@ -95,7 +95,7 @@ public class SteamDownloader {
 				int byteRead;
 				StringBuilder line = new StringBuilder();
 				setState(INITIALIZE);
-				Iterator<IDownloadable> downloadables = this.downloadables.iterator();
+				Iterator<ISteamDownloadable> downloadables = this.downloadables.iterator();
 				int downloadProgress = 0;
 				currentDownload = null;
 				boolean next = false;
@@ -138,7 +138,7 @@ public class SteamDownloader {
 						else if (state == DOWNLOADING) {
 							if(currentDownload != null) {
 								downloadProgress++;
-								IDownload download = processedDownloads.get(currentDownload);
+								ISteamDownload download = processedDownloads.get(currentDownload);
 								if(download == null) {
 									putDownload(onManifestDownload, currentDownload, new CompletedDownload(currentDownload, installDir));
 									System.out.println("\n[" + downloadProgress + "/" + this.downloadables.size() + "] Downloaded " + currentDownload);
@@ -328,7 +328,7 @@ public class SteamDownloader {
 		return Set.copyOf(processedDownloads.values());
 	}
 	
-	private void putDownload(Consumer<IDownload> onManifestDownload, IManifest manifest, IDownload download) {
+	private void putDownload(Consumer<ISteamDownload> onManifestDownload, IManifest manifest, ISteamDownload download) {
 		this.processedDownloads.put(manifest, download);
 		onManifestDownload.accept(download);
 	}
