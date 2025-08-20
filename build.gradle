@@ -26,6 +26,7 @@ dependencies {
 	implementation (libs.guava)
 	implementation (libs.log4j)
 	api (libs.masshash)
+	api (libs.steamworks)
 
 	// Use JUnit Jupiter for testing.
 	testImplementation (libs.junit)

@@ -29,9 +29,47 @@ public class Vault {
 	public final Path vaultDir;
 	public final Path blobDir;
 	
+	
+	/**
+	 * Constructs a {@code Vault} rooted at the given {@code vaultDir}, using the default
+	 * blob subdirectory {@code vaultDir/blobs}.
+	 * <p>
+	 * This constructor is a shorthand for {@code new Vault(vaultDir, Path.of("."))}.
+	 * It creates the vault directory and blob directory if they do not already exist.
+	 *
+	 * @param vaultDir the base directory for the vault
+	 * @throws IOException if an I/O error occurs while creating the necessary directories
+	 * @throws IllegalArgumentException if the resolved blob directory is outside the vault directory
+	 */
 	public Vault(Path vaultDir) throws IOException {
+		this(vaultDir, Path.of("."));
+	}
+	
+	/**
+	 * Constructs a {@code Vault} with the specified vault directory and a blob directory
+	 * relative to it.
+	 * <p>
+	 * The blob directory must be a relative path. It will be resolved as {@code vaultDir.resolve(blobDir).resolve("blobs")},
+	 * and both the vault directory and the final blob directory will be created if they do not already exist.
+	 * <p>
+	 * If the resolved blob directory is outside the vault directory (e.g., via a path like {@code "../"}), an exception will be thrown.
+	 *
+	 * @param vaultDir the root directory of the vault
+	 * @param blobDir a relative path (which will be resolved against {@code vaultDir}) where blobs will be stored. {@code /blobs} will be appended to the path.
+	 * @throws IOException if an I/O error occurs while creating the necessary directories
+	 * @throws IllegalArgumentException if {@code blobDir} is absolute or if the resolved blob directory escapes {@code vaultDir}
+	 */
+	public Vault(Path vaultDir, Path blobDir) throws IOException {
+		if(blobDir.isAbsolute()) {
+			throw new IllegalArgumentException("Blob directory must be relative!");
+		}
+		
 		this.vaultDir = vaultDir;
-		this.blobDir = vaultDir.resolve("blobs");
+		this.blobDir = vaultDir.resolve(blobDir).resolve("blobs");
+		
+		if (!this.blobDir.normalize().startsWith(this.vaultDir)) {
+			throw new IllegalArgumentException("Blob directory must be within the vault directory!");
+		}
 		
 		Files.createDirectories(this.vaultDir);
 		Files.createDirectories(this.blobDir);
@@ -39,6 +77,11 @@ public class Vault {
 	
 	public ChrysalisizedVault chrysalisize(IVaultable version) throws IOException, MissingVersionException {
 		return new ChrysalisizedVault(version, this);
+	}
+	
+
+	public ChrysalisizedVault chrysalisize(IVaultable version, Chrysalis chrysalis) throws IOException {
+		return new ChrysalisizedVault(version, this, chrysalis);
 	}
 	
 	public Path getVaultDir() {
