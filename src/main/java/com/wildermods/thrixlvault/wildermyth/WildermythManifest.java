@@ -6,7 +6,12 @@ import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -25,10 +30,12 @@ import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.DatabaseError;
 import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
+import com.wildermods.thrixlvault.exception.VersionParsingException;
 import com.wildermods.thrixlvault.steam.INamed;
 import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.steam.IVersioned;
 import com.wildermods.thrixlvault.utils.OS;
+import com.wildermods.thrixlvault.utils.version.Version;
 
 public record WildermythManifest(OS os, String version, long manifest) implements ISteamDownloadable, IVersioned, INamed {
 
@@ -146,6 +153,33 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 			throw new UnknownVersionException("Could not find version " + version + " for OS " + os);
 		}
 		return new WildermythManifest(os, version, manifestID);
+	}
+	
+	public static WildermythManifest getLatest() throws UnknownVersionException {
+		return getLatest(OS.getOS());
+	}
+	
+	public static WildermythManifest getLatest(OS os) throws UnknownVersionException {
+		final List<Version> versions = new ArrayList<>();
+		final Map<String, Long> manifestMap = new HashMap<>(manifests.row(os));
+		final List<String> versionStrings = manifestMap.keySet().stream().toList();
+		
+		versionStrings.forEach((v) -> {
+			try {
+				if(!branches.values().contains(manifests.get(os, v)) && !v.contains("r")) { //if the manifest is public, and the version is not a re-release
+					versions.add(Version.parse(v));
+				}
+			} catch (VersionParsingException e) {
+				throw new RuntimeException(e);
+			}
+		});
+		
+		versions.sort(Comparator.naturalOrder());
+		
+		System.out.println(versions.get(versions.size() - 1).getClass());
+		
+		return get(versions.get(versions.size() - 1).getFriendlyString());
+
 	}
 	
 	private static void init() throws IntegrityException {
