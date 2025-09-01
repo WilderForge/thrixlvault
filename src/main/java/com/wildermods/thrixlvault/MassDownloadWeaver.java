@@ -7,6 +7,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.steam.CompletedDownload;
 import com.wildermods.thrixlvault.steam.FailedDownload;
@@ -14,25 +15,26 @@ import com.wildermods.thrixlvault.steam.ISteamDownload;
 import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.utils.FileUtil;
 
-public class MassDownloadWeaver {
+public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDownload>{
 	
 	final String username;
 	final int totalDownloads;
-	final LinkedHashSet<ISteamDownloadable> downloadables;
 	final HashMap<ISteamDownloadable, Integer> failedDownloads = new HashMap<>();
-	final HashSet<ISteamDownload> finishedDownloads = new HashSet<ISteamDownload>();
 	
-	public MassDownloadWeaver(String username, Collection<ISteamDownloadable> downloadable) throws IOException, InterruptedException {
+	public MassDownloadWeaver(String username, Collection<ISteamDownloadable> downloadables) throws IOException, InterruptedException {
+		super(downloadables);
 		this.username = username;
-		totalDownloads = downloadable.size();
-		downloadables = new LinkedHashSet<>(downloadable);
+		totalDownloads = downloadables.size();
 	}
 	
-	public void run() throws IOException, InterruptedException {
+	public Set<ISteamDownload> runImpl() throws IOException {
+		final HashSet<ISteamDownloadable> downloadables = new LinkedHashSet<>(this.downloadables);
+		final HashSet<ISteamDownload> finishedDownloads = new HashSet<ISteamDownload>();
 		while(!downloadables.isEmpty()) {
 			
 			SteamDownloader downloader = new SteamDownloader(username, downloadables);
-			Set<ISteamDownload> downloads = downloader.run((download) -> {
+			
+			downloader.setConsumer((download) -> {
 				if(download instanceof CompletedDownload) {
 					try {
 						Weaver weaver = new Weaver(Vault.DEFAULT, download);
@@ -46,6 +48,8 @@ public class MassDownloadWeaver {
 					throw new RuntimeException(e);
 				}
 			});
+			
+			Set<ISteamDownload> downloads = downloader.run();
 			for(ISteamDownload download : downloads) {
 				if(download instanceof FailedDownload) {
 					final int attempt;
@@ -94,6 +98,12 @@ public class MassDownloadWeaver {
 		System.out.println("Remaining downloads:" + remaining + "/" + totalDownloads);
 		System.out.println("Other status downloads: " + other + "/" + totalDownloads);
 		System.out.println("Downloads unaccounted for: " + (totalDownloads - (failed + success + other + remaining)));
+		return finishedDownloads;
+	}
+
+	@Override
+	protected ImmutableSet<ISteamDownload> getDownloadsInProgress() throws UnsupportedOperationException {
+		throw new UnsupportedOperationException();
 	}
 	
 }

@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 import javax.security.auth.login.CredentialException;
 import javax.security.sasl.AuthenticationException;
 
+import com.google.common.collect.ImmutableSet;
 import com.wildermods.thrixlvault.steam.CompletedDownload;
 import com.wildermods.thrixlvault.steam.FailedDownload;
 import com.wildermods.thrixlvault.steam.IManifest;
@@ -30,14 +31,13 @@ import com.wildermods.thrixlvault.utils.FileUtil;
 
 import static com.wildermods.thrixlvault.SteamDownloader.SteamState.*;
 
-public class SteamDownloader {
+public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownload> {
 
 	private static final Object GLOBAL_RUN_LOCK = new Object(); // So we only have one instance of steamcmd operating at a time.
 
 	public static final Path DEFAULT_APP_INSTALL_DIR = Path.of(System.getProperty("user.home")).resolve("thrixlvault").resolve("current_download");
 	private final Path installDir;
 	private final String username;
-	private final Collection<ISteamDownloadable> downloadables;
 	private final HashMap<IManifest, ISteamDownload> processedDownloads = new HashMap<IManifest, ISteamDownload>();
 
 	private volatile Process process;
@@ -45,8 +45,12 @@ public class SteamDownloader {
 	private volatile SteamState steamState = SteamState.UNINITIALIZED;
 	private volatile boolean userInput = false;
 	private volatile Instant lastResponse = Instant.now();
+	private volatile Duration hangTimeout = Duration.ofSeconds(30);
+	private volatile Duration downloadTimeout = Duration.ofMinutes(7);
+	private volatile Consumer<ISteamDownload> onManifestDownload = (d) -> {};
 	
 	private final Object interruptLock = new Object();
+	private final Object stateLock = new Object();
 	private volatile boolean interrupt = false;;
 	
 	private volatile ISteamDownloadable currentDownload;
@@ -54,26 +58,34 @@ public class SteamDownloader {
 	private static final Pattern ERROR_REGEX = Pattern.compile("ERROR \\((?<error>.*)\\)\\n");
 
 	public SteamDownloader(String username, Collection<ISteamDownloadable> downloads) {
+		super(downloads);
 		this.username = username;
-		this.downloadables = downloads;
 		this.installDir = DEFAULT_APP_INSTALL_DIR;
 	}
 	
 	public SteamDownloader(String username, Collection<ISteamDownloadable> downloads, Path installDir) {
+		super(downloads);
 		this.username = username;
-		this.downloadables = downloads;
 		this.installDir = installDir;
 	}
 	
-	public Set<ISteamDownload> run() throws Throwable {
-		return run((c) -> {});
+	public SteamDownloader setHangTimeout(Duration hangTimeout) {
+		this.hangTimeout = hangTimeout;
+		return this;
 	}
 	
-	public Set<ISteamDownload> run(Consumer<ISteamDownload> onManifestDownload) throws IOException, InterruptedException {
-		return run(onManifestDownload, Duration.ofSeconds(30), Duration.ofMinutes(7));
+	public SteamDownloader setDownloadTimeout(Duration downloadTimeout) {
+		this.downloadTimeout = downloadTimeout;
+		return this;
 	}
-
-	public Set<ISteamDownload> run(Consumer<ISteamDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException, InterruptedException {
+	
+	public SteamDownloader setConsumer(Consumer<ISteamDownload> onManifestDownload) {
+		this.onManifestDownload = onManifestDownload;
+		return this;
+	}
+	
+	@Override
+	public Set<ISteamDownload> runImpl() throws IOException {
 		synchronized (GLOBAL_RUN_LOCK) {
 			System.out.println("[DOWNLOADER] Acquired global run lock");
 			return this.runInternal(onManifestDownload, hangTimeout, downloadTimeout);
@@ -328,6 +340,11 @@ public class SteamDownloader {
 		return Set.copyOf(processedDownloads.values());
 	}
 	
+	@Override
+	protected ImmutableSet<ISteamDownload> getDownloadsInProgress() throws UnsupportedOperationException {
+		throw new UnsupportedOperationException();
+	}
+	
 	private void putDownload(Consumer<ISteamDownload> onManifestDownload, IManifest manifest, ISteamDownload download) {
 		this.processedDownloads.put(manifest, download);
 		onManifestDownload.accept(download);
@@ -382,14 +399,17 @@ public class SteamDownloader {
 		return steamState;
 	}
 	
-	private synchronized SteamState setState(SteamState newState) {
-		prevState = getState();
-		steamState = newState;
-		System.out.println("\n[DOWNLOADER/STATE]: Steam state changed from " + prevState + " to " + newState);
-		return prevState;
+	private SteamState setState(SteamState newState) {
+		synchronized(stateLock) {
+			prevState = getState();
+			steamState = newState;
+			System.out.println("\n[DOWNLOADER/STATE]: Steam state changed from " + prevState + " to " + newState);
+			return prevState;
+		}
 	}
 
 	public enum SteamState {
 		UNINITIALIZED, INITIALIZE, SETUP_DIR, LOGGING_IN, DOWNLOADING, FINISHED, FAILURE
 	}
+
 }
