@@ -3,8 +3,7 @@ commons_io_version = "2.19.0"
 commons_lang_version = "3.17.0"
 gson_version = "2.13.1"
 guava_version = "33.4.8-jre"
-junit_version = "5.13.0"
-junit_platform_version = "6.0.0"
+junit_version = "6.0.0"
 log4j_version = "2.24.3"
 masshash_version = "1.3.1.0"
 
@@ -14,7 +13,7 @@ commons_lang = { module = "org.apache.commons:commons-lang3", version.ref = "com
 gson = { module = "com.google.code.gson:gson", version.ref = "gson_version" }
 guava = { module = "com.google.guava:guava", version.ref = "guava_version" }
 junit = { module = "org.junit.jupiter:junit-jupiter", version.ref = "junit_version"}
-junit_platform = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit_platform_version" }
+junit_platform = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit_version" }
 log4j = { module = "org.apache.logging.log4j:log4j-core", version.ref = "log4j_version" } 
 masshash = { module = "com.wildermods:masshash", version.ref = "masshash_version" }
 
