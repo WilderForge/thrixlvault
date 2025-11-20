@@ -42,7 +42,7 @@ public class StringVersion implements Version {
 	@Override
 	public int compareTo(IVersioned o) {
 		if(o instanceof Version) {
-			return getFriendlyString().compareTo(((StringVersion) o).getFriendlyString());
+			return getFriendlyString().compareTo(((Version) o).getFriendlyString());
 		}
 		return getFriendlyString().compareTo(o.version());
 	}
