@@ -7,17 +7,24 @@ import com.wildermods.thrixlvault.utils.version.Version;
 public interface IVersioned extends Comparable<IVersioned>{
 	public String version();
 	
+	public default Version asVersion() throws VersionParsingException {
+		if(this instanceof Version) {
+			return (Version) this;
+		}
+		return Version.parse(version());
+	}
+	
 	public default int compareTo(IVersioned other)  {
 		Version thisVersion;
 		Version otherVersion;
 		try {
-			thisVersion = Version.parse(version());
+			thisVersion = asVersion();
 		}
 		catch(VersionParsingException e) {
 			return -1;
 		}
 		try {
-			otherVersion = Version.parse(other.version());
+			otherVersion = other.asVersion();
 		}
 		catch(VersionParsingException e) {
 			return 1;

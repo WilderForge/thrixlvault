@@ -67,6 +67,11 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		return version;
 	}
 	
+	@Override
+	public Version asVersion() throws VersionParsingException {
+		return Version.parse(version().replace('+', '.'));
+	}
+	
 	public String name() {
 		return os() + " " + version();
 	}
