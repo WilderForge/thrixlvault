@@ -24,7 +24,7 @@ import com.wildermods.thrixlvault.steam.IVersioned;
  *
  * @see ModMetadata#getVersion()
  */
-public interface Version extends Comparable<Version>, IVersioned {
+public interface Version extends IVersioned {
 	/**
 	 * Returns the user-friendly representation of this version.
 	 */

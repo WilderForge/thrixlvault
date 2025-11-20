@@ -16,6 +16,8 @@
 
 package com.wildermods.thrixlvault.utils.version;
 
+import com.wildermods.thrixlvault.steam.IVersioned;
+
 public class StringVersion implements Version {
 	private final String version;
 
@@ -38,8 +40,11 @@ public class StringVersion implements Version {
 	}
 
 	@Override
-	public int compareTo(Version o) {
-		return getFriendlyString().compareTo(o.getFriendlyString());
+	public int compareTo(IVersioned o) {
+		if(o instanceof Version) {
+			return getFriendlyString().compareTo(((StringVersion) o).getFriendlyString());
+		}
+		return getFriendlyString().compareTo(o.version());
 	}
 
 	@Override

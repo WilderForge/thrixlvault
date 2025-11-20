@@ -37,7 +37,7 @@ import com.wildermods.thrixlvault.steam.IVersioned;
 import com.wildermods.thrixlvault.utils.OS;
 import com.wildermods.thrixlvault.utils.version.Version;
 
-public record WildermythManifest(OS os, String version, long manifest) implements ISteamDownloadable, IVersioned, INamed {
+public record WildermythManifest(OS os, String version, long manifest) implements ISteamDownloadable, IVersioned, INamed, Comparable<IVersioned> {
 
 	static {
 		try {

@@ -23,6 +23,7 @@ import java.util.StringTokenizer;
 import java.util.regex.Pattern;
 
 import com.wildermods.thrixlvault.exception.VersionParsingException;
+import com.wildermods.thrixlvault.steam.IVersioned;
 
 /**
  * Parser for a superset of the semantic version format described at <a href="https://semver.org">semver.org</a>.
@@ -248,9 +249,9 @@ public class SemanticVersionImpl implements SemanticVersion {
 	}
 
 	@Override
-	public int compareTo(Version other) {
+	public int compareTo(IVersioned other) {
 		if (!(other instanceof SemanticVersion)) {
-			return getFriendlyString().compareTo(other.getFriendlyString());
+			return getFriendlyString().compareTo(other.version());
 		}
 
 		SemanticVersion o = (SemanticVersion) other;
