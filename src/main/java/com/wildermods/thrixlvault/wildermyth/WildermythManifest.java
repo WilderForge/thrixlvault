@@ -83,6 +83,10 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		return os == OS.WINDOWS;
 	}
 	
+	public boolean isCurrentOS() {
+		return os == OS.getOS();
+	}
+	
 	@Override
 	public Path artifactPath() {
 		return Path.of(GAME_NAME).resolve(os().name()).resolve(version());
@@ -101,6 +105,9 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	public boolean isBranch(String branchName) {
+		if(branchName.equalsIgnoreCase("public")) {
+			return isPublic();
+		}
 		return branches.get(branchName).contains(manifest);
 	}
 	
@@ -119,8 +126,16 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		return manifestStream().collect(Collectors.toUnmodifiableSet());
 	}
 	
+	public static Set<WildermythManifest> getManifests(OS os) {
+		return manifestStream(os).collect(Collectors.toUnmodifiableSet());
+	}
+	
 	public static Stream<WildermythManifest> manifestStream() {
 		return manifests.cellSet().stream().map(cell -> new WildermythManifest(cell.getRowKey(), cell.getColumnKey(), cell.getValue()));
+	}
+	
+	public static Stream<WildermythManifest> manifestStream(OS os) {
+		return manifests.cellSet().stream().map(cell -> new WildermythManifest(cell.getRowKey(), cell.getColumnKey(), cell.getValue())).filter(WildermythManifest::isCurrentOS);
 	}
 	
 	@Deprecated
