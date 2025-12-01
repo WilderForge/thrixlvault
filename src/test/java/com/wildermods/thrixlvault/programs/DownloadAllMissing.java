@@ -16,9 +16,11 @@ public class DownloadAllMissing {
 
 	public static void main(String[] args) throws Throwable {
 		
-		Collection<ISteamDownloadable> manifests = WildermythManifest.manifestStream()
-			.filter(WildermythManifest::isPublic)
-			.collect(Collectors.toList());
+		
+		Collection<ISteamDownloadable> manifests = WildermythManifest.manifestStream().filter((manifest) -> {
+				return manifest.isPublic() || (manifest.isVersionKnown() && manifest.isLatest());
+		})
+		.collect(Collectors.toList());
 		
 		ArrayList<ISteamDownloadable> toDownload = new ArrayList<>();
 		for(ISteamDownloadable manifest : manifests) {
@@ -42,8 +44,8 @@ public class DownloadAllMissing {
 			Vault vault = new Vault(Vault.DEFAULT_VAULT_DIR);
 			String header = "========Verifying " + manifest.name() + "========";
 			System.out.println(header);
-			ChrysalisizedVault cVault = vault.chrysalisize(manifest);
 			try {
+				ChrysalisizedVault cVault = vault.chrysalisize(manifest);
 				cVault.verifyBlobs();
 			}
 			catch(Throwable t) {

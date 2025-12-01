@@ -1,28 +1,19 @@
 package com.wildermods.thrixlvault.wildermyth;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.io.Reader;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.google.common.collect.HashBasedTable;
 import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
-import com.google.common.collect.Table;
-import com.google.common.collect.Table.Cell;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -47,8 +38,7 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		}
 	}
 	
-	private static Table<OS, String, Long> manifests;
-	private static Multimap<String, Long> branches;
+	private static Map<OS, Multimap<String, ManifestEntry>> manifests;
 	
 	public static final String GAME_NAME = "Wildermyth";
 	public static final long GAME_ID = 763890;
@@ -68,8 +58,13 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	@Override
-	public Version asVersion() throws VersionParsingException {
-		return Version.parse(version().replace('+', '.'));
+	public Version asVersion() {
+		try {
+			return Version.parse(fixVersion(version()));
+		}
+		catch(VersionParsingException e) {
+			throw new AssertionError(e);
+		}
 	}
 	
 	public String name() {
@@ -92,13 +87,29 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 		return os == OS.getOS();
 	}
 	
+	public boolean isVersionKnown() {
+		return !version.startsWith("unkn_");
+	}
+	
+	public boolean isLatest() {
+		return getAllLatest("public", "unstable").contains(this);
+	}
+	
+	public boolean isLatestStable() {
+		return isLatest("public");
+	}
+	
+	public boolean isLatest(String branch) {
+		return getAllLatest(branch).contains(this);
+	}
+	
 	@Override
 	public Path artifactPath() {
 		return Path.of(GAME_NAME).resolve(os().name()).resolve(version());
 	}
 	
 	public boolean isPublic() {
-		return !branches.values().contains(manifest);
+		return isBranch("public");
 	}
 	
 	public boolean isUnstable() {
@@ -110,10 +121,25 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	public boolean isBranch(String branchName) {
-		if(branchName.equalsIgnoreCase("public")) {
-			return isPublic();
+		Multimap<String, ManifestEntry> mmap = manifests.get(os());
+		if (mmap == null) return false;
+		Collection<ManifestEntry> entries = mmap.get(branchName);
+		if (entries == null) return false;
+		return entries.stream().anyMatch(e -> e.manifest() == manifest());
+	}
+	
+	@Override
+	public String downloadBlockedReason() {
+		if(!isPublic() && !isUnstable()) {
+			return "Only manifests from the 'public' or 'unstable' branch can be downloaded.";
 		}
-		return branches.get(branchName).contains(manifest);
+		if(isUnstable()) {
+			WildermythManifest latestUnstable = getLatest("unstable");
+			if(!isLatest("unstable")) {
+				return "Can only download the latest unstable version: (" + latestUnstable.version + "). Cannot download (" + version() + ")";
+			}
+		}
+		return null;
 	}
 	
 	public boolean equals(Object o) {
@@ -136,28 +162,27 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	public static Stream<WildermythManifest> manifestStream() {
-		return manifests.cellSet().stream().map(cell -> new WildermythManifest(cell.getRowKey(), cell.getColumnKey(), cell.getValue()));
+		return manifests.entrySet().stream()
+			.flatMap(e -> e.getValue().entries().stream()
+				.map(x -> new WildermythManifest(e.getKey(), x.getValue().version(), x.getValue().manifest())));
 	}
 	
 	public static Stream<WildermythManifest> manifestStream(OS os) {
-		return manifests.cellSet().stream().map(cell -> new WildermythManifest(cell.getRowKey(), cell.getColumnKey(), cell.getValue())).filter(WildermythManifest::isCurrentOS);
+		Multimap<String, ManifestEntry> mmap = manifests.get(os);
+		if(mmap == null) {
+			return Stream.empty();
+		}
+		
+		return mmap.entries().stream().map(e -> new WildermythManifest(os, e.getValue().version(), e.getValue().manifest()));
 	}
 	
 	@Deprecated
 	public static WildermythManifest get(long manifestID) throws UnknownVersionException {
-		if(manifests == null) {
-			throw new IllegalStateException("Wildermyth Manifests not initialized!");
-		}
-		Set<Cell<OS, String, Long>> cells = manifests.cellSet().parallelStream()
-		.filter((c) -> {return c.getValue().longValue() == manifestID;}) //filter by manifest id
-		.sorted((c1, c2) -> c1.getColumnKey().compareTo(c2.getColumnKey())) //sort by version number (in case of manifests with multiple versions)
-		.collect(Collectors.toCollection(LinkedHashSet::new)); 
-		
-		if(!cells.isEmpty()) {
-			Cell<OS, String, Long> definition = cells.iterator().next();
-			return new WildermythManifest(definition.getRowKey(), definition.getColumnKey(), definition.getValue()); //return the version with the least suffixes (in the case of 1.0r1 and 1.0, 1.0 would be returned)
-		}
-		throw new UnknownVersionException("Could not find manifest definition " + manifestID + " for any OS");
+		return manifestStream()
+				.filter(m -> m.manifest() == manifestID)
+				.findFirst()
+				.orElseThrow(() ->
+					new UnknownVersionException("Could not find manifest definition " + manifestID + " for any OS"));
 	}
 	
 	public static WildermythManifest get(String version) throws UnknownVersionException {
@@ -165,123 +190,192 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	public static WildermythManifest get(OS os, String version) throws UnknownVersionException {
-		if(manifests == null) {
-			throw new IllegalStateException("Wildermyth Manifests not initialized");
-		}
-		Long manifestID = manifests.get(os, version);
-		if(manifestID == null) {
-			throw new UnknownVersionException("Could not find version " + version + " for OS " + os);
-		}
-		return new WildermythManifest(os, version, manifestID);
+		return get(os, fixVersion(version));
 	}
 	
-	public static WildermythManifest getLatest() throws UnknownVersionException {
+	public static WildermythManifest get(OS os, Version version) throws UnknownVersionException {
+		return manifestStream(os)
+				.filter(m -> m.asVersion().equals(version))
+				.findFirst()
+				.orElseThrow(() -> new UnknownVersionException("Could not find manifest " + version));
+	}
+	
+	public static WildermythManifest getLatest() {
 		return getLatest(OS.getOS());
 	}
 	
-	public static WildermythManifest getLatest(OS os) throws UnknownVersionException {
-		final List<Version> versions = new ArrayList<>();
-		final Map<String, Long> manifestMap = new HashMap<>(manifests.row(os));
-		final List<String> versionStrings = manifestMap.keySet().stream().toList();
-		
-		versionStrings.forEach((v) -> {
-			try {
-				if(!branches.values().contains(manifests.get(os, v)) && !v.contains("r")) { //if the manifest is public, and the version is not a re-release
-					versions.add(Version.parse(v));
-				}
-			} catch (VersionParsingException e) {
-				throw new RuntimeException(e);
-			}
-		});
-		
-		versions.sort(Comparator.naturalOrder());
-		
-		System.out.println(versions.get(versions.size() - 1).getClass());
-		
-		return get(versions.get(versions.size() - 1).getFriendlyString());
+	public static WildermythManifest getLatest(String... branches) {
+		return getLatest(OS.getOS(), branches);
+	}
+	
+	public static WildermythManifest getLatest(OS os, String... branchNames) {
+		if (branchNames == null || branchNames.length == 0) {
+			branchNames = new String[]{"public"};
+		}
 
+		Multimap<String, ManifestEntry> mmap = manifests.get(os);
+		if (mmap == null || mmap.isEmpty()) {
+			return null;
+		}
+
+		Set<String> branches = Set.of(branchNames);
+
+		ManifestEntry bestEntry = null;
+		Version bestVersion = null;
+
+		for (String branch : branches) {
+			Collection<ManifestEntry> entries = mmap.get(branch);
+			if (entries == null || entries.isEmpty()) {
+				continue;
+			}
+
+			for (ManifestEntry entry : entries) {
+				Version v;
+				try {
+					if(entry.isKnown()) {
+						v = Version.parse(fixVersion(entry.version()));
+					}
+					else {
+						continue;
+					}
+				} catch (VersionParsingException ex) {
+					continue;
+				}
+
+				if (bestVersion == null || v.compareTo(bestVersion) > 0) {
+					bestVersion = v;
+					bestEntry = entry;
+				}
+			}
+		}
+
+		if (bestEntry == null) {
+			return null;
+		}
+
+		return new WildermythManifest(os, bestEntry.version(), bestEntry.manifest());
+	}
+	
+	public static Set<WildermythManifest> getAllLatest(String... branchNames) {
+		if (branchNames == null || branchNames.length == 0) {
+			branchNames = new String[]{"public"};
+		}
+
+		Set<String> branches = Set.of(branchNames);
+		Set<WildermythManifest> result = new HashSet<>();
+
+		for (OS os : OS.values()) {
+			Multimap<String, ManifestEntry> mmap = manifests.get(os);
+			if (mmap == null || mmap.isEmpty()) {
+				continue;
+			}
+
+			for (String branch : branches) {
+				Collection<ManifestEntry> entries = mmap.get(branch);
+				if (entries == null || entries.isEmpty()) {
+					continue;
+				}
+
+				ManifestEntry bestEntry = null;
+				Version bestVersion = null;
+
+				for (ManifestEntry entry : entries) {
+
+					if (!entry.isKnown()) {
+						continue;
+					}
+
+					Version v;
+					try {
+						v = Version.parse(fixVersion(entry.version()));
+					} catch (VersionParsingException e) {
+						continue;
+					}
+
+					if (bestVersion == null || v.compareTo(bestVersion) > 0) {
+						bestVersion = v;
+						bestEntry = entry;
+					}
+				}
+
+				if (bestEntry != null) {
+					result.add(new WildermythManifest(os, bestEntry.version(), bestEntry.manifest()));
+				}
+			}
+		}
+
+		return Collections.unmodifiableSet(result);
+	}
+	
+	private static String fixVersion(String vanillaVersion) {
+		return vanillaVersion.replace('+', '.').replace('-', '+');
 	}
 	
 	private static void init() throws IntegrityException {
-		manifests = HashBasedTable.create();
-		branches = HashMultimap.create(2, 300);
+		manifests = new HashMap<>();
 		InputStream in = WildermythManifest.class.getResourceAsStream("/depots.json");
 		if(in == null) {
 			throw new MissingResourceException("Could not locate depot json");
 		}
-		JsonElement element;
-		try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
-			element = JsonParser.parseReader(reader);
-		} catch (IOException e) {
-			throw new MissingResourceException("Could not parse depot json", e);
-		}
-		
-		JsonObject o = element.getAsJsonObject();
-		
-		JsonElement game = o.get("game");
-		if(game == null) {
-			throw new IntegrityException("No 'game' field in json object");
-		}
-		if(game.getAsLong() != GAME_ID) {
-			throw new IntegrityException("Expected game '" + GAME_ID + "', got " + game + " instead");
-		}
-		
-		JsonElement gameName = o.getAsJsonPrimitive("gameName");
-		if(gameName == null) {
-			throw new IntegrityException("No 'gameName' field in json object");
-		}
-		if(!gameName.getAsString().equals("Wildermyth")) {
-			throw new IntegrityException("Expected gameName '" + GAME_NAME +"', got " + gameName + " instead");
-		}
-		
-		os:
-		for(OS os : OS.values()) {
-			long depot;
-			
-			JsonObject osElement = o.getAsJsonObject(os.name());
-			if(osElement == null) {
-				throw new IntegrityException("No entry for OS " + os + " in depots.json!");
+		JsonObject root = JsonParser.parseReader(new InputStreamReader(in)).getAsJsonObject();
+
+		manifests.clear();
+		Map<Long, OS> globalManifestIds = new HashMap<>(); // check cross-OS duplicates
+
+		for (OS os : OS.values()) {
+			if (!root.has(os.name())) {
+				throw new AssertionError("Missing manifest data for OS: " + os.name());
 			}
-			
-			JsonElement depotElement = osElement.get("depot");
-			if(depotElement == null) {
-				throw new IntegrityException("No depot defined for OS " + os);
+			JsonObject osNode = root.getAsJsonObject(os.name());
+
+			Multimap<String, ManifestEntry> osManifests = HashMultimap.create();
+			Set<Long> seenInOS = new HashSet<>(); // track IDs in this OS
+
+			JsonObject manifestMap = osNode.getAsJsonObject("manifests");
+			JsonObject branchesNode = osNode.has("branches") ? osNode.getAsJsonObject("branches") : new JsonObject();
+			JsonObject allowedDuplicatesNode = osNode.has("allowedDuplicates") ? osNode.getAsJsonObject("allowedDuplicates") : new JsonObject();
+
+			Map<Long, Set<String>> allowedDuplicates = new HashMap<>();
+			for (Map.Entry<String, JsonElement> entry : allowedDuplicatesNode.entrySet()) {
+				long id = Long.parseLong(entry.getKey());
+				Set<String> versions = new HashSet<>();
+				entry.getValue().getAsJsonArray().forEach(v -> versions.add(v.getAsString()));
+				allowedDuplicates.put(id, versions);
 			}
-			depot = depotElement.getAsLong();
-			System.out.println("Depot is " + depot + ", OS is " + os );
-			
-			JsonObject manifestsElement = osElement.getAsJsonObject("manifests");
-			if(manifestsElement == null) {
-				throw new IntegrityException("No manifests defined for OS " + os);
-			}
-			
-			manifests:
-			{
-				for(Entry<String, JsonElement> entry : manifestsElement.entrySet()) {
-					WildermythManifest manifest = new WildermythManifest(os, entry.getKey(), entry.getValue().getAsLong());
-					if(manifests.containsValue(manifest.version)) {
-						
-					}
-					WildermythManifest.manifests.put(os, manifest.version(), entry.getValue().getAsLong());
+
+			Map<Long, String> manifestToBranch = new HashMap<>();
+			for (Map.Entry<String, JsonElement> branchEntry : branchesNode.entrySet()) {
+				String branch = branchEntry.getKey();
+				for (JsonElement idElem : branchEntry.getValue().getAsJsonArray()) {
+					manifestToBranch.put(idElem.getAsLong(), branch);
 				}
 			}
-			
-			JsonObject branchesElement = osElement.getAsJsonObject("branches");
-			if(branchesElement == null) {
-				throw new IntegrityException("No 'branches' json object defined for OS " + os);
-			}
-			branches:
-			{
-				for(Entry<String, JsonElement> entry : branchesElement.entrySet()) {
-					String branch = entry.getKey();
-					JsonArray branchArray = entry.getValue().getAsJsonArray();
-					for(JsonElement manifest : branchArray) {
-						branches.put(branch, manifest.getAsLong());
-					}
+
+			for (Map.Entry<String, JsonElement> manifestEntry : manifestMap.entrySet()) {
+				String version = manifestEntry.getKey();
+				long manifestID = manifestEntry.getValue().getAsLong();
+				String branch = manifestToBranch.getOrDefault(manifestID, "public");
+
+				Collection<ManifestEntry> existing = osManifests.get(branch);
+				boolean duplicateOk = allowedDuplicates.getOrDefault(manifestID, Collections.emptySet()).contains(version);
+				if (!duplicateOk) {
+					boolean exists = existing.stream().anyMatch(me -> me.manifest() == manifestID);
+					if (exists) throw new AssertionError("Duplicate manifest " + manifestID + " in OS " + os + " for version " + version);
 				}
+
+				// Only check cross-OS duplicates for IDs that haven't already been seen in this OS
+				if (!seenInOS.contains(manifestID) && globalManifestIds.containsKey(manifestID)) {
+					throw new AssertionError("Manifest " + manifestID + " appears in multiple OS types");
+				}
+
+				osManifests.put(branch, new ManifestEntry(version, manifestID));
+				globalManifestIds.put(manifestID, os);
+				seenInOS.add(manifestID);
 			}
+
+			manifests.put(os, osManifests);
 		}
-		
 	}
+
 	
 }

@@ -27,6 +27,7 @@ import com.wildermods.thrixlvault.steam.FailedDownload;
 import com.wildermods.thrixlvault.steam.IManifest;
 import com.wildermods.thrixlvault.steam.ISteamDownload;
 import com.wildermods.thrixlvault.steam.ISteamDownloadable;
+import com.wildermods.thrixlvault.steam.SkippedDownload;
 import com.wildermods.thrixlvault.utils.FileUtil;
 
 import static com.wildermods.thrixlvault.SteamDownloader.SteamState.*;
@@ -112,6 +113,7 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 				currentDownload = null;
 				boolean next = false;
 				
+				main:
 				while ((byteRead = inputStream.read()) != -1 || next) {
 					responded();
 					char outputChar = 0;
@@ -156,12 +158,12 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 									System.out.println("\n[" + downloadProgress + "/" + this.downloadables.size() + "] Downloaded " + currentDownload);
 								}
 								else {
-									if(!(download instanceof FailedDownload)) {
+									if(!(download instanceof FailedDownload || download instanceof SkippedDownload)) {
 										throw new AssertionError(currentDownload + " already completed??");
 									}
 								}
 							}
-							if(downloadables.hasNext()) {
+							while(downloadables.hasNext()) {
 								currentDownload = downloadables.next();
 								if(Files.exists(installDir)) {
 									System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Clearing " + installDir);
@@ -176,14 +178,22 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 										System.out.println("Deleted steam patch file: " + steamPatchFile);
 									}
 								}
-								System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Downloading " + currentDownload);
-								send(currentDownload.getDownloadCommand(installDir));
+								
+								String skipReason;
+								if((skipReason = currentDownload.downloadBlockedReason()) != null) {
+									putDownload(onManifestDownload, currentDownload, new SkippedDownload(currentDownload, installDir, skipReason));
+									System.out.println("\n[" + downloadProgress + "/" + this.downloadables.size() + "] Skipped " + currentDownload + ". Reason: " + skipReason);
+									downloadProgress++;
+								}
+								else {
+									System.out.println("[" + downloadProgress + "/" + this.downloadables.size() + "] Downloading " + currentDownload);
+									send(currentDownload.getDownloadCommand(installDir));
+									continue main;
+								}
 							}
-							else {
-								next = true;
-								setState(FINISHED);
-								continue;
-							}
+							next = true;
+							setState(FINISHED);
+							continue;
 						}
 						line = new StringBuilder();
 					}

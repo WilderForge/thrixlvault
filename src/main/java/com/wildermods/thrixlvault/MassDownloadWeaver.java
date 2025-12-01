@@ -1,6 +1,7 @@
 package com.wildermods.thrixlvault;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -13,6 +14,7 @@ import com.wildermods.thrixlvault.steam.CompletedDownload;
 import com.wildermods.thrixlvault.steam.FailedDownload;
 import com.wildermods.thrixlvault.steam.ISteamDownload;
 import com.wildermods.thrixlvault.steam.ISteamDownloadable;
+import com.wildermods.thrixlvault.steam.SkippedDownload;
 import com.wildermods.thrixlvault.utils.FileUtil;
 
 public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDownload>{
@@ -20,6 +22,7 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 	final String username;
 	final int totalDownloads;
 	final HashMap<ISteamDownloadable, Integer> failedDownloads = new HashMap<>();
+	final HashMap<ISteamDownloadable, Integer> skippedDownloads = new HashMap<>();
 	
 	public MassDownloadWeaver(String username, Collection<ISteamDownloadable> downloadables) throws IOException, InterruptedException {
 		super(downloadables);
@@ -43,7 +46,9 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 					}
 				}
 				try {
-					FileUtil.deleteDirectory(download.dest());
+					if(Files.exists(download.dest())) {
+						FileUtil.deleteDirectory(download.dest());
+					}
 				} catch (IOException e) {
 					throw new RuntimeException(e);
 				}
@@ -69,16 +74,17 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 						finishedDownloads.add(download);
 					}
 				}
-				else {
+				else if (download instanceof CompletedDownload){
 					System.out.println("Successfully downloaded " + download);
-					downloadables.remove(download);
-					finishedDownloads.add(download);
 				}
+				downloadables.remove(download);
+				finishedDownloads.add(download);
 			}
 		}
 		
 		int failed = 0;
 		int success = 0;
+		int skipped = 0;
 		int other = 0;
 		final int remaining = downloadables.size();
 		for(ISteamDownload download : finishedDownloads) {
@@ -88,16 +94,20 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 			else if(download instanceof FailedDownload) {
 				failed++;
 			}
+			else if (download instanceof SkippedDownload) {
+				skipped++;
+			}
 			else {
 				other++;
 			}
 		}
 		System.out.println("Total downloads scheduled: " + totalDownloads);
 		System.out.println("Successful downloads:" + success + "/" + totalDownloads);
+		System.out.println("Skipped downloads:" + skipped + "/" + totalDownloads);
 		System.out.println("Failed downloads:" + failed + "/" + totalDownloads);
 		System.out.println("Remaining downloads:" + remaining + "/" + totalDownloads);
 		System.out.println("Other status downloads: " + other + "/" + totalDownloads);
-		System.out.println("Downloads unaccounted for: " + (totalDownloads - (failed + success + other + remaining)));
+		System.out.println("Downloads unaccounted for: " + (totalDownloads - (failed + success + skipped + other + remaining)));
 		return finishedDownloads;
 	}
 
