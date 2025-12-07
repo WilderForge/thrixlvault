@@ -308,7 +308,7 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	private static String fixVersion(String vanillaVersion) {
-		return vanillaVersion.replace('+', '.').replace('-', '+').replace("r", "+r.");
+		return vanillaVersion.replace('+', '.').replace("r", "-r.");
 	}
 	
 	private static void init() throws IntegrityException {
