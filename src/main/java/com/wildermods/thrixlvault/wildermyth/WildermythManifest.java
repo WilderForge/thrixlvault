@@ -185,12 +185,12 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 					new UnknownVersionException("Could not find manifest definition " + manifestID + " for any OS"));
 	}
 	
-	public static WildermythManifest get(String version) throws UnknownVersionException {
+	public static WildermythManifest get(String version) throws UnknownVersionException, VersionParsingException {
 		return get(OS.getOS(), version);
 	}
 	
-	public static WildermythManifest get(OS os, String version) throws UnknownVersionException {
-		return get(os, fixVersion(version));
+	public static WildermythManifest get(OS os, String version) throws UnknownVersionException, VersionParsingException {
+		return get(os, Version.parse(fixVersion(version)));
 	}
 	
 	public static WildermythManifest get(OS os, Version version) throws UnknownVersionException {
