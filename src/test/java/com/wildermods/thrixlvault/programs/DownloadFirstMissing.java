@@ -10,6 +10,7 @@ import com.wildermods.thrixlvault.ChrysalisizedVault;
 import com.wildermods.thrixlvault.MassDownloadWeaver;
 import com.wildermods.thrixlvault.Vault;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
+import com.wildermods.thrixlvault.exception.VersionParsingException;
 import com.wildermods.thrixlvault.steam.ISteamDownloadable;
 import com.wildermods.thrixlvault.utils.OS;
 import com.wildermods.thrixlvault.wildermyth.WildermythManifest;
@@ -67,7 +68,7 @@ public class DownloadFirstMissing {
 		
 	}
 	
-	private static WildermythManifest get(OS os, String version) throws UnknownVersionException {
+	private static WildermythManifest get(OS os, String version) throws UnknownVersionException, VersionParsingException {
 		return WildermythManifest.get(os, version);
 	}
 }
