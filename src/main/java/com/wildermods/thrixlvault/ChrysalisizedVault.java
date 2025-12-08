@@ -60,11 +60,6 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	}
 	
 	public void verifyBlobs() throws InterruptedException, ExecutionException {
-		verifyBlobs(false);
-	}
-	
-	@Deprecated(forRemoval = true)
-	public void verifyBlobs(boolean unused) throws InterruptedException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + artifact);
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
