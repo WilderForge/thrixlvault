@@ -76,7 +76,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 					new Blob(blobFile, hash); //constructor verifies the file contents match the hash
 				}
 				catch(IntegrityException e) {
-					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage());
+					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage(), e);
 				}
 			}
 			catch (Throwable t) {
