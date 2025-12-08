@@ -156,21 +156,18 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		}
 	}
 	
-	
-	boolean terminated = false;
-	
 	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, ExecutionException {
 	    Multiset<Hash> hashes = chrysalis.blobs().keys();
 	    int threads = Runtime.getRuntime().availableProcessors();
 	    ExecutorService executor = Executors.newFixedThreadPool(threads);
 	    List<Future<Void>> futures = new ArrayList<>();
 
-	    terminated = false;
+	    boolean[] terminated = new boolean[] {false};
 	    
 	    try {
 	        for (Hash hash : hashes.elementSet()) {
 	            Future<Void> future = executor.submit(() -> {
-	            	if(!terminated) {
+	            	if(!terminated[0]) {
 	            		hashTask.call(hash, blobDir, chrysalis);
 	            	}
 	                return null;
@@ -182,7 +179,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	            try {
 	                future.get(); // this will throw if the task failed
 	            } catch (ExecutionException e) {
-	            	terminated = true;
+	            	terminated[0] = true;
 	                // Cancel all other tasks
 	                for (Future<Void> f : futures) {
 	                    f.cancel(true);
