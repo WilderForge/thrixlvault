@@ -207,7 +207,21 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		verifyDirectory(destDir, false);
 	}
 	
-	public SetMultimap<Hash, Throwable> delete() throws IOException, UnknownVersionException {
+	/**
+	 * @deprecated This method permanently deletes all blob files this
+	 * version uses from the vault, and as such can corrupt the blob store.
+	 *<p>
+	 * Deleting a blob is unsafe because multiple game versions may reference
+	 * the same blob content. If a shared blob is removed, any version that
+	 * depends on it **will** fail verification with a {@link DatabaseMissingBlobError}.
+	 * <p>
+	 * This method should only be used when the vault contains exactly one
+	 * version, or when the entire vault is being deleted (e.g., when removing
+	 * temporary vaults used for unit tests). Under all other circumstances,
+	 * blobs must be preserved, and this method should not be called.
+	 */
+	@Deprecated(forRemoval = false)
+	public SetMultimap<Hash, Throwable> purge() throws IOException, UnknownVersionException {
 		
 		Multiset<Hash> hashes = chrysalis.blobs().keys();
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
