@@ -48,6 +48,7 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 	}
 	
 	@Override
+	@SuppressWarnings("deprecation")
 	public Chrysalis read(JsonReader in) throws IOException {
 		Chrysalis ret = new Chrysalis();
 		
@@ -96,6 +97,7 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 	}
 
 	
+	@SuppressWarnings("deprecation")
 	static Chrysalis parseSchema_0(Chrysalis ret, JsonReader reader, Hash firstHash) throws IOException {
 		Map<Hash, Set<Path>> temp = new HashMap<>();
 		{
