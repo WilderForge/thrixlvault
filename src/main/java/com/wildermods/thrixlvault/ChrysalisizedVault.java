@@ -36,6 +36,27 @@ import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.exception.UnknownVersionException;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
+/**
+ * Represents an artifact stored in a {@link Vault} along with its computed {@link Chrysalis}.
+ *
+ * <p>
+ * A {@code ChrysalisizedVault} allows verification of the integrity of all blobs and resources
+ * associated with a particular artifact. It supports concurrent verification and export operations,
+ * and it ensures that resources are consistent with their expected content.
+ * </p>
+ *
+ * <p>
+ * This class wraps an {@link IVaultable} artifact and provides access to its {@link Chrysalis},
+ * which maps {@link Hash} objects to the corresponding file paths that share the same hash.
+ * </p>
+ *
+ * <p>
+ * Most operations that read or verify blobs are thread-safe. Export and deletion operations
+ * are also designed to work safely with concurrent verification tasks, but care must be taken
+ * with the deprecated {@link #purge()} method, which can permanently remove blobs and corrupt
+ * the vault if multiple versions share the same blob.
+ * </p>
+ */
 public class ChrysalisizedVault extends Vault implements IVaultable {
 
 	static final Logger LOGGER = LogManager.getLogger();
@@ -44,10 +65,28 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	final Chrysalis chrysalis;
 	final Marker marker;
 	
+	
+	/**
+	 * Constructs a ChrysalisizedVault for the given artifact by loading its Chrysalis
+	 * from the parent vault.
+	 *
+	 * @param artifact the versioned artifact
+	 * @param parent the vault containing the artifact
+	 * @throws IOException if an I/O error occurs while reading the chrysalis
+	 * @throws MissingVersionException if the chrysalis file for the artifact is missing
+	 */
 	ChrysalisizedVault(IVaultable artifact, Vault parent) throws IOException, MissingVersionException {
 		this(artifact, parent, handleFromFile(artifact, parent));
 	}
 	
+	/**
+	 * Constructs a ChrysalisizedVault with a provided Chrysalis instance.
+	 *
+	 * @param artifact the versioned artifact
+	 * @param parent the vault containing the artifact
+	 * @param chrysalis the pre-computed chrysalis for the artifact
+	 * @throws IOException if an I/O error occurs while initializing the vault
+	 */
 	ChrysalisizedVault(IVaultable artifact, Vault parent, Chrysalis chrysalis) throws IOException {
 		super(parent.vaultDir);
 		this.chrysalis = chrysalis;
@@ -55,10 +94,22 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		this.marker = MarkerManager.getMarker(artifact.name());
 	}
 
+	/**
+	 * Returns the {@link Chrysalis} representing this artifact's hashed file state.
+	 *
+	 * @return the chrysalis for this artifact
+	 */
 	public Chrysalis getChrysalis() {
 		return chrysalis;
 	}
 	
+	/**
+	 * Verifies that all blobs in this artifact exist in the vault and are uncorrupted.
+	 *
+	 * @throws InterruptedException if the verification is interrupted
+	 * @throws ExecutionException if a verification task fails
+	 * @throws DatabaseIntegrityError if any blob is missing or corrupted
+	 */
 	public void verifyBlobs() throws InterruptedException, ExecutionException {
 		LOGGER.info(marker, "Verifying " + artifact);
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
@@ -76,7 +127,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 					new Blob(blobFile, hash); //constructor verifies the file contents match the hash
 				}
 				catch(IntegrityException e) {
-					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage());
+					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage(), e);
 				}
 			}
 			catch (Throwable t) {
@@ -102,10 +153,29 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		}
 	}
 	
+	/**
+	 * Verifies that all files in the given directory match the expected content hashes.
+	 *
+	 * @param path the directory containing the files to verify
+	 * 
+	 * @throws InterruptedException if verification is interrupted
+	 * @throws IntegrityException if any file is missing or its content does not match its hash
+	 * @throws ExecutionException if a verification task fails
+	 */
 	public void verifyDirectory(Path path) throws InterruptedException, IntegrityException, ExecutionException {
 		verifyDirectory(path, true);
 	}
 	
+	/**
+	 * Verifies that all files in the given directory match the expected content hashes.
+	 *
+	 * @param path the directory containing the files to verify
+	 * @param verifyDatabase whether to verify the vault's blobs first
+	 * 
+	 * @throws InterruptedException if verification is interrupted
+	 * @throws IntegrityException if any file is missing or its content does not match its hash
+	 * @throws ExecutionException if a verification task fails
+	 */
 	public void verifyDirectory(Path path, boolean verifyDatabase) throws InterruptedException, IntegrityException, ExecutionException {
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 		
@@ -151,6 +221,17 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		}
 	}
 	
+	/**
+	 * Iterates over all blobs in the artifact and applies the given {@link HashTask}.
+	 *
+	 * <p>This method processes blobs in parallel using a thread pool
+	 * sized according to the number of available processors.</p>
+	 *
+	 * @param hashTask the task to execute for each blob
+	 * 
+	 * @throws InterruptedException if execution is interrupted
+	 * @throws ExecutionException if a task throws an exception
+	 */
 	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, ExecutionException {
 	    Multiset<Hash> hashes = chrysalis.blobs().keys();
 	    int threads = Runtime.getRuntime().availableProcessors();
@@ -190,7 +271,17 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	    }
 	}
 
-	
+	/**
+	 * Exports all files from this artifact to the specified destination directory.
+	 *
+	 * @param destDir the directory to export files to
+	 * @param verifyBlobs whether to verify vault blobs before exporting
+	 * 
+	 * @throws InterruptedException if execution is interrupted
+	 * @throws IntegrityException if any file verification fails
+	 * @throws ExecutionException if a task fails
+	 * @throws IOException if writing to the destination fails
+	 */
 	public void export(Path destDir, boolean verifyBlobs) throws InterruptedException, IntegrityException, ExecutionException {
 		if(verifyBlobs) {
 			verifyBlobs();
@@ -207,7 +298,21 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		verifyDirectory(destDir, false);
 	}
 	
-	public SetMultimap<Hash, Throwable> delete() throws IOException, UnknownVersionException {
+	/**
+	 * @deprecated This method permanently deletes all blob files this
+	 * version uses from the vault, and as such can corrupt the blob store.
+	 *<p>
+	 * Deleting a blob is unsafe because multiple game versions may reference
+	 * the same blob content. If a shared blob is removed, any version that
+	 * depends on it **will** fail verification with a {@link DatabaseMissingBlobError}.
+	 * <p>
+	 * This method should only be used when the vault contains exactly one
+	 * version, or when the entire vault is being deleted (e.g., when removing
+	 * temporary vaults used for unit tests). Under all other circumstances,
+	 * blobs must be preserved, and this method should not be called.
+	 */
+	@Deprecated(forRemoval = false)
+	public SetMultimap<Hash, Throwable> purge() throws IOException, UnknownVersionException {
 		
 		Multiset<Hash> hashes = chrysalis.blobs().keys();
 		final SetMultimap<Hash, Throwable> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
@@ -237,10 +342,20 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		return problems;
 	}
 	
+	/**
+	 * Checks whether this artifact has a corresponding Chrysalis file in the vault.
+	 *
+	 * @return {@code true} if the Chrysalis file exists
+	 */
 	public boolean hasChrysalis() {
 		return hasChrysalis(this);
 	}
 	
+	/**
+	 * Returns the path to the Chrysalis file for this artifact.
+	 *
+	 * @return the path to the chrysalis JSON file
+	 */
 	public Path getChrysalisFile() {
 		return getChrysalisFile(this);
 	}
@@ -254,6 +369,11 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		}
 	}
 	
+	/**
+	 * Returns the underlying artifact for this ChrysalisizedVault.
+	 *
+	 * @return the wrapped IVaultable artifact
+	 */
 	public IVaultable getArtifact() {
 		return artifact;
 	}

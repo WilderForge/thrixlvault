@@ -222,7 +222,7 @@ public class WeaverTests {
 			assertTrue(chrysalisJson.contains(hash.hash()), "Hash string not found in serialized manifest!: " + hash);
 		}
 		
-		weaver.getChrysalisizedVault().delete();
+		weaver.getChrysalisizedVault().purge();
 	}
 	
 	@Test
@@ -257,21 +257,21 @@ public class WeaverTests {
 		assertTrue(jCurrent.equals(jMac));
 		
 		try {
-			linux.getChrysalisizedVault().delete();
+			linux.getChrysalisizedVault().purge();
 		}
 		catch(Throwable t) {
 			t.printStackTrace();
 		}
 		
 		try {
-			windows.getChrysalisizedVault().delete();
+			windows.getChrysalisizedVault().purge();
 		}
 		catch(Throwable t) {
 			t.printStackTrace();
 		}
 		
 		try {
-			mac.getChrysalisizedVault().delete();
+			mac.getChrysalisizedVault().purge();
 		}
 		catch(Throwable t) {
 			t.printStackTrace();

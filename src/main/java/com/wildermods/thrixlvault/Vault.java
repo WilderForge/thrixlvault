@@ -11,6 +11,16 @@ import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
+/**
+ * Represents a ThrixlVault storage location. A vault holds blobs and
+ * version-specific Chrysalis data for one or more game versions.
+ *
+ * Vaults store blob files in a shared <code>blobs</code> directory, and each
+ * version stores its generated Chrysalis data under its own artifact path.
+ *
+ * Blobs are intended to be immutable and shared across all versions that
+ * reference them.
+ */
 public class Vault {
 
 	public static final Path DEFAULT_VAULT_DIR = Path.of(System.getProperty("user.home")).resolve("thrixlvault");
