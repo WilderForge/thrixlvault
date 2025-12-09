@@ -342,10 +342,11 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 		}
 		catch(InterruptedException e) {
 			e.printStackTrace();
+		}
+		finally {
 			process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly); //for some reason a process leak occurs if we don't do this
 			process.destroyForcibly();
 		}
-
 		
 		return Set.copyOf(processedDownloads.values());
 	}
