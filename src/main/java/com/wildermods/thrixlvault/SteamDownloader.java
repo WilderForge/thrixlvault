@@ -171,7 +171,7 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 								}
 								for(Path steamPatchFile : Files.walk(installDir.getParent(), 1) //delete steam patch files from the parent directory so a new download attempt always starts fresh
 									.filter((path) -> { 
-										return path.startsWith("state") && path.endsWith(".patch");
+										return path.getFileName().toString().startsWith("state") && path.getFileName().toString().endsWith(".patch");
 									}
 								).toList()) {
 									if(Files.deleteIfExists(steamPatchFile)){
