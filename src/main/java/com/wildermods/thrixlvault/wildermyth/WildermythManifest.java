@@ -49,6 +49,11 @@ public record WildermythManifest(OS os, String version, long manifest) implement
 	}
 	
 	@Override
+	public String gameName() {
+		return GAME_NAME;
+	}
+	
+	@Override
 	public long depot() {
 		return os.getDepot();
 	}
