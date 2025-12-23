@@ -23,6 +23,7 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 	final int totalDownloads;
 	final HashMap<ISteamDownloadable, Integer> failedDownloads = new HashMap<>();
 	final HashMap<ISteamDownloadable, Integer> skippedDownloads = new HashMap<>();
+	volatile boolean stopsOnInterrupt = false;
 	
 	public MassDownloadWeaver(String username, Collection<ISteamDownloadable> downloadables) throws IOException, InterruptedException {
 		super(downloadables);
@@ -30,55 +31,76 @@ public class MassDownloadWeaver extends Downloader<ISteamDownloadable, ISteamDow
 		totalDownloads = downloadables.size();
 	}
 	
+	public MassDownloadWeaver setStopOnInterrupt(boolean shouldStop) {
+		this.stopsOnInterrupt = shouldStop;
+		return this;
+	}
+	
+	public boolean stopsOnInterrupt() {
+		return stopsOnInterrupt;
+	}
+	
 	public Set<ISteamDownload> runImpl() throws IOException {
 		final HashSet<ISteamDownloadable> downloadables = new LinkedHashSet<>(this.downloadables);
 		final HashSet<ISteamDownload> finishedDownloads = new HashSet<ISteamDownload>();
 		while(!downloadables.isEmpty()) {
-			
 			SteamDownloader downloader = new SteamDownloader(username, downloadables);
-			
-			downloader.setConsumer((download) -> {
-				if(download instanceof CompletedDownload) {
+			try {
+
+				
+				downloader.setConsumer((download) -> {
+					if(download instanceof CompletedDownload) {
+						try {
+							Weaver weaver = new Weaver(Vault.DEFAULT, download);
+						} catch (IOException | IntegrityException e) {
+							throw new RuntimeException(e);
+						}
+					}
 					try {
-						Weaver weaver = new Weaver(Vault.DEFAULT, download);
-					} catch (IOException | IntegrityException e) {
+						if(Files.exists(download.dest())) {
+							FileUtil.deleteDirectory(download.dest());
+						}
+					} catch (IOException e) {
 						throw new RuntimeException(e);
 					}
-				}
-				try {
-					if(Files.exists(download.dest())) {
-						FileUtil.deleteDirectory(download.dest());
+				});
+				
+				Set<ISteamDownload> downloads = downloader.run();
+				for(ISteamDownload download : downloads) {
+					if(download instanceof FailedDownload) {
+						final int attempt;
+						if(!failedDownloads.containsKey(download)) {
+							attempt = 1;
+							failedDownloads.put(download, attempt);
+						}
+						else {
+							attempt = failedDownloads.get(download);
+							failedDownloads.put(download, attempt + 1);
+						}
+						((FailedDownload) download).failReason().printStackTrace();
+						System.out.println("Attempt " + attempt + " failed for manifest " + download);
+						if(attempt >= 30) {
+							System.out.println("Could not download " + download);
+							downloadables.remove(download);
+							finishedDownloads.add(download);
+						}
 					}
-				} catch (IOException e) {
-					throw new RuntimeException(e);
-				}
-			});
-			
-			Set<ISteamDownload> downloads = downloader.run();
-			for(ISteamDownload download : downloads) {
-				if(download instanceof FailedDownload) {
-					final int attempt;
-					if(!failedDownloads.containsKey(download)) {
-						attempt = 1;
-						failedDownloads.put(download, attempt);
+					else if (download instanceof CompletedDownload){
+						System.out.println("Successfully downloaded " + download);
 					}
-					else {
-						attempt = failedDownloads.get(download);
-						failedDownloads.put(download, attempt + 1);
-					}
-					((FailedDownload) download).failReason().printStackTrace();
-					System.out.println("Attempt " + attempt + " failed for manifest " + download);
-					if(attempt >= 30) {
-						System.out.println("Could not download " + download);
-						downloadables.remove(download);
-						finishedDownloads.add(download);
-					}
+					downloadables.remove(download);
+					finishedDownloads.add(download);
 				}
-				else if (download instanceof CompletedDownload){
-					System.out.println("Successfully downloaded " + download);
+			}
+			catch(InterruptedException e) {
+				if(stopsOnInterrupt) {
+					for(ISteamDownloadable download : downloadables) {
+						FailedDownload fail = new FailedDownload(download, downloader.getInstallDir(), e);
+						finishedDownloads.add(fail);
+					}
+					downloadables.clear();
+					break;
 				}
-				downloadables.remove(download);
-				finishedDownloads.add(download);
 			}
 		}
 		

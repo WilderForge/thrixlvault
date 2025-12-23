@@ -50,8 +50,9 @@ public abstract class Downloader<Downloadable extends IDownloadable, Download ex
      * 
      * @return an immutable set of completed downloads.
      * @throws IOException 
+     * @throws InterruptedException 
      */
-	public final Set<Download> run() throws IOException {
+	public final Set<Download> run() throws IOException, InterruptedException {
 		synchronized(runLock) {
 			finishedDownloads = ImmutableSet.copyOf(runImpl());
 			finished = true;
@@ -59,7 +60,7 @@ public abstract class Downloader<Downloadable extends IDownloadable, Download ex
 		}
 	}
 	
-	protected abstract Set<Download> runImpl() throws IOException;
+	protected abstract Set<Download> runImpl() throws IOException, InterruptedException;
 	
 	public final boolean isFinished() {
 		return finished;

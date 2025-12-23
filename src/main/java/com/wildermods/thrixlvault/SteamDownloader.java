@@ -86,14 +86,14 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 	}
 	
 	@Override
-	public Set<ISteamDownload> runImpl() throws IOException {
+	public Set<ISteamDownload> runImpl() throws IOException, InterruptedException {
 		synchronized (GLOBAL_RUN_LOCK) {
 			System.out.println("[DOWNLOADER] Acquired global run lock");
 			return this.runInternal(onManifestDownload, hangTimeout, downloadTimeout);
 		}
 	}
 
-	private Set<ISteamDownload> runInternal(Consumer<ISteamDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException {
+	private Set<ISteamDownload> runInternal(Consumer<ISteamDownload> onManifestDownload, Duration hangTimeout, Duration downloadTimeout) throws IOException, InterruptedException  {
 		ProcessBuilder processBuilder = new ProcessBuilder("steamcmd");
 		processBuilder.redirectErrorStream(true); // Merge stdout and stderr
 		process = processBuilder.start();
@@ -340,9 +340,6 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 			}
 			System.out.println("SteamCMD exited with exit code " + exitCode);
 		}
-		catch(InterruptedException e) {
-			e.printStackTrace();
-		}
 		finally {
 			process.toHandle().descendants().forEach(ProcessHandle::destroyForcibly); //for some reason a process leak occurs if we don't do this
 			process.destroyForcibly();
@@ -404,6 +401,10 @@ public class SteamDownloader extends Downloader<ISteamDownloadable, ISteamDownlo
 	   	System.out.println("[DOWNLOADER/COMMAND] Executing '" + command + "'");
 		writer.write(command + "\n");
 		writer.flush();
+	}
+	
+	public Path getInstallDir() {
+		return installDir;
 	}
 	
 	public SteamState getState() {
