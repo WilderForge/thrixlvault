@@ -17,8 +17,10 @@ import com.google.gson.JsonIOException;
 import com.google.gson.JsonSyntaxException;
 
 import com.wildermods.masshash.Blob;
+import com.wildermods.masshash.BlobFactory;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.Hasher;
+import com.wildermods.masshash.IBlob;
 import com.wildermods.masshash.utils.Reference;
 
 /**
@@ -44,7 +46,7 @@ import com.wildermods.masshash.utils.Reference;
  * Chrysalis should be treated as immutable snapshots.
  * </p>
  */
-public class Chrysalis extends Hasher implements Cloneable {
+public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	
 	static final Logger LOGGER = LogManager.getLogger();
 	
@@ -77,7 +79,7 @@ public class Chrysalis extends Hasher implements Cloneable {
 	 *                    {@link Path} may be modified before being added to the result map
 	 * @throws IOException if file traversal or hashing fails
 	 */
-	Chrysalis(Path dir, BiConsumer<Reference<Path>, Blob> forEachBlob) throws IOException {
+	Chrysalis(Path dir, BiConsumer<Reference<Path>, IBlob> forEachBlob) throws IOException {
 		super(Files.walk(dir), forEachBlob);
 	}
 
@@ -103,7 +105,7 @@ public class Chrysalis extends Hasher implements Cloneable {
 	 * @return a newly computed {@code Chrysalis}
 	 * @throws IOException if file traversal or hashing fails
 	 */
-	public static Chrysalis fromDir(Path path, BiConsumer<Reference<Path>, Blob> forEachBlob) throws IOException {
+	public static Chrysalis fromDir(Path path, BiConsumer<Reference<Path>, IBlob> forEachBlob) throws IOException {
 		LOGGER.info("Constructing Chrysalis from " + path);
 		return new Chrysalis(path, forEachBlob);
 	}
@@ -161,7 +163,7 @@ public class Chrysalis extends Hasher implements Cloneable {
 			Comparator.comparing(Hash::hash),
 			Ordering.natural()
 		);
-		
+
 		for(Hash key : this.blobs.keySet()) {
 			for(Path path : this.blobs.values()) {
 				chrysalis.blobs.put(key, path);
@@ -190,6 +192,15 @@ public class Chrysalis extends Hasher implements Cloneable {
 	@Deprecated(forRemoval = false)
 	public void setBlobs(SetMultimap<Hash, Path> blobs) {
 		this.blobs = blobs;
+	}
+	
+	public BlobFactory getBlobFactory() {
+		return blobFactory;
+	}
+	
+	public Chrysalis factory(BlobFactory factory) {
+		this.blobFactory = factory;
+		return this;
 	}
 	
 }

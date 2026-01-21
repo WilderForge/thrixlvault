@@ -123,8 +123,8 @@ public class WeaverTests {
 	@Order(4)
 	void databaseCorruptionTest() {
 	   	System.out.println("Corruption test:");
-	   	Blob corruptBlob = new Blob("corrupt".getBytes());
 	   	chrysalis = weaver.getChrysalisizedVault().chrysalis;
+	   	Blob corruptBlob = chrysalis.getBlobFactory().blob("corrupt".getBytes());
 	   	
 		chrysalis.blobs().keySet().forEach((hash) -> {
 			try {
@@ -169,7 +169,7 @@ public class WeaverTests {
 		randomHash = blobs.stream().skip(new Random().nextInt(blobs.size())).findFirst().orElseThrow();
 		Path blobFile = weaver.getChrysalisizedVault().getBlobFile(randomHash);
 		System.out.println("Blob file: " + blobFile);
-		Blob blob = new Blob(blobFile);
+		Blob blob = chrysalis.getBlobFactory().blob(blobFile);
 		
 		Files.delete(blobFile);
 		DatabaseIntegrityError e = assertThrowsExactly(DatabaseIntegrityError.class, () -> weaver.verify());

@@ -1,9 +1,11 @@
 package com.wildermods.thrixlvault;
 
 import java.io.IOException;
+import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -140,6 +142,7 @@ public class Weaver implements IVaultable {
 		AtomicLong overwrittenBlobs = new AtomicLong();
 		final Set<Path> writtenBlobs = ConcurrentHashMap.newKeySet();
 		final OpenOption[] openOptions = !force ? new StandardOpenOption[] {StandardOpenOption.CREATE_NEW} : new StandardOpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
+		final CopyOption[] copyOptions = !force ? new StandardCopyOption[0] : new StandardCopyOption[]{StandardCopyOption.REPLACE_EXISTING};
 		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (p, blob) -> {
 			Path blobPath = vault.blobDir.resolve(blob.hash());
 			p.set(sourceDir.relativize(p.get())); //set the path output to be relativized
@@ -155,7 +158,7 @@ public class Weaver implements IVaultable {
 							overwrittenBlobs.addAndGet(1);
 						}
 						
-						Files.write(blobPath, blob.data(), openOptions);
+						Files.copy(blob.dataStream(), blobPath, copyOptions);
 					}
 					else {
 						LOGGER.warn(marker, "Skipping concurrent write of " + blobPath);

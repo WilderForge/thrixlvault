@@ -2,6 +2,8 @@ package com.wildermods.thrixlvault;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,16 +14,17 @@ import java.util.Set;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.TreeMultimap;
-
+import com.google.gson.JsonParseException;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
-import com.wildermods.masshash.Blob;
+import com.wildermods.masshash.BlobFactory;
 import com.wildermods.masshash.Hash;
+import com.wildermods.masshash.utils.ByteUtil;
 
 public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 	
-	private static final int SCHEMA = 1;
+	private static final int SCHEMA = 2;
 	
 	@Override
 	public void write(JsonWriter out, Chrysalis value) throws IOException {
@@ -29,6 +32,9 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 		{
 			out.name("schema");
 			out.value(SCHEMA);
+			
+			out.name("algorithm");
+			out.value(value.getBlobFactory().algorithm());
 			
 			out.name("blobs");
 			out.beginObject();
@@ -61,7 +67,29 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 				schema = in.nextInt();
 			}
 			else {
-				return parseSchema_0(ret, in, new Blob((byte[])null, name));
+				return parseSchema_0(ret, in, Hash.of(name));
+			}
+		}
+		
+		String algorithm;
+		if(schema == 1) {
+			 algorithm = "SHA-1";
+		}
+		else {
+			String name = in.nextName();
+			if(name.equals("algorithm")) {
+				algorithm = in.nextString();
+				try {
+					ret.factory(new BlobFactory(
+						ByteUtil.consume.apply(MessageDigest.getInstance(algorithm))
+					));
+				} catch (NoSuchAlgorithmException e) {
+					throw new IOException(e);
+				}
+				
+			}
+			else {
+				throw new JsonParseException("Expected 'algorithm', got " + name);
 			}
 		}
 		
@@ -71,7 +99,9 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 			Map<Hash, Set<Path>> temp = new HashMap<>();
 			
 			while(in.hasNext()) {
-				Hash hash = new Blob((byte[])null, in.nextName());
+				Hash hash = Hash.of(() -> {
+					return ret.getBlobFactory().digest.get();
+				}, in.nextName());
 				in.beginArray();
 				Set<Path> paths = temp.computeIfAbsent(hash, set -> new HashSet<>());
 				while(in.hasNext()) {
@@ -110,7 +140,7 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 		}
 		
 		while(reader.hasNext()) {
-			Hash hash = new Blob((byte[])null, reader.nextName());
+			Hash hash = Hash.of(reader.nextName());
 			Set<Path> paths = temp.computeIfAbsent(hash, set -> new HashSet<>());
 			reader.beginArray();
 			{

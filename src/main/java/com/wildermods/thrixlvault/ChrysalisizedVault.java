@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -24,6 +23,7 @@ import com.google.common.collect.Multimaps;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.SetMultimap;
 import com.wildermods.masshash.Blob;
+import com.wildermods.masshash.BlobFactory;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.masshash.exception.IntegrityProblem;
@@ -114,6 +114,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		LOGGER.info(marker, "Verifying " + artifact);
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
+		final BlobFactory factory = chrysalis.getBlobFactory();
 		computeOverBlobs((hash, vaultDir, chrysalis) -> {
 			Path blobFile = vaultDir.resolve(hash.hash());
 			try {
@@ -124,7 +125,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 				}
 				
 				try {
-					new Blob(blobFile, hash); //constructor verifies the file contents match the hash
+					factory.blob(blobFile, hash).verify();
 				}
 				catch(IntegrityException e) {
 					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage(), e);
@@ -187,15 +188,17 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		else {
 			LOGGER.warn(marker, "Skipping database verification.");
 		}
+		final BlobFactory factory = chrysalis.getBlobFactory();
 		computeOverBlobs((hash, vaultDir, chrysalis) -> {
 			Set<Path> resources = chrysalis.blobs().get(hash);
+			
 			for(Path localizedResource : resources) {
 				try {
 					Path resource = path.resolve(localizedResource);
 					if(!Files.exists(resource)) {
 						throw new MissingResourceException("Missing Resource - " + hash + " (" + resource + ")");
 					}
-					new Blob(resource, hash); //constructor verifies the file contents match the hash
+					factory.blob(resource, hash).verify();
 				}
 				catch(Throwable t) {
 					if(t instanceof IntegrityException) {
@@ -286,13 +289,14 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		if(verifyBlobs) {
 			verifyBlobs();
 		}
+		final BlobFactory factory = chrysalis.getBlobFactory();
 		computeOverBlobs((hash, path, chrysalis) -> {
-			Blob blob = new Blob(path.resolve(hash.hash()), hash);
+			Blob blob = factory.blob(path.resolve(hash.hash()), hash);
 			Set<Path> dests = chrysalis.blobs().get(hash);
 			for(Path relativeDest : dests) {
 				Path dest = destDir.resolve(relativeDest);
 				Files.createDirectories(dest.getParent());
-				Files.write(dest, blob.data(), StandardOpenOption.CREATE_NEW);
+				Files.copy(blob.dataStream(), dest);
 			}
 		});
 		verifyDirectory(destDir, false);
@@ -358,6 +362,14 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 */
 	public Path getChrysalisFile() {
 		return getChrysalisFile(this);
+	}
+	
+	public Path getBlobFile(Hash hash) {
+		return getBlobFile(blobDir, hash);
+	}
+	
+	public Path getBlobFile(Path blobDir, Hash hash) {
+		return blobDir.resolve(hash.hash());
 	}
 	
 	private static final Chrysalis handleFromFile(IVaultable version, Vault vault) throws IOException, MissingVersionException {

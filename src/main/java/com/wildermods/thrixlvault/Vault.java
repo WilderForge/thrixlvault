@@ -4,10 +4,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import com.wildermods.masshash.Blob;
-import com.wildermods.masshash.Hash;
-import com.wildermods.masshash.exception.IntegrityException;
-import com.wildermods.thrixlvault.exception.MissingResourceException;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
@@ -59,32 +55,12 @@ public class Vault {
 		return blobDir;
 	}
 	
-	public boolean hasBlob(Hash hash) {
-		return Files.exists(getBlobFile(hash));
-	}
-	
-	public Blob getBlob(Hash hash) throws IOException, IntegrityException {
-		Path path = getBlobFile(hash);
-		if(Files.exists(path)){
-			return new Blob(path, hash);
-		}
-		throw new MissingResourceException(path.toString());
-	}
-	
 	public boolean hasChrysalis(IVaultable artifact) {
 		return Files.exists(getChrysalisFile(artifact));
 	}
 
 	public Path getChrysalisFile(IVaultable artifact) {
 		return vaultDir.resolve(artifact.artifactPath()).resolve("blobs.json");
-	}
-	
-	public Path getBlobFile(Hash hash) {
-		return getBlobFile(blobDir, hash);
-	}
-	
-	public Path getBlobFile(Path blobDir, Hash hash) {
-		return blobDir.resolve(hash.hash());
 	}
 	
 	@Override
