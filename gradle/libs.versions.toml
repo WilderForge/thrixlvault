@@ -4,7 +4,7 @@ commons_lang_version = "3.20.0"
 gson_version = "2.13.2"
 guava_version = "33.5.0-jre"
 junit_version = "6.0.1"
-log4j_version = "2.25.2"
+log4j_version = "2.25.3"
 masshash_version = "2.0.0.0"
 
 [libraries]
