@@ -1,5 +1,7 @@
 package com.wildermods.thrixlvault.utils.version;
 
+import java.io.Serializable;
+
 import com.wildermods.thrixlvault.exception.VersionParsingException;
 import com.wildermods.thrixlvault.steam.IVersioned;
 
@@ -24,7 +26,7 @@ import com.wildermods.thrixlvault.steam.IVersioned;
  *
  * @see ModMetadata#getVersion()
  */
-public interface Version extends IVersioned {
+public interface Version extends IVersioned, Serializable {
 	/**
 	 * Returns the user-friendly representation of this version.
 	 */

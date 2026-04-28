@@ -19,6 +19,7 @@ package com.wildermods.thrixlvault.utils.version;
 import com.wildermods.thrixlvault.steam.IVersioned;
 
 public class StringVersion implements Version {
+	private static final long serialVersionUID = -3088428126880149921L;
 	private final String version;
 
 	public StringVersion(String version) {
