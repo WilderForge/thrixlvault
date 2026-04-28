@@ -6,7 +6,7 @@ plugins {
 
 version = thrixlVaultVersion
 group = "com.wildermods"
-archivesBaseName = "thrixlvault"
+project.base.archivesName = "thrixlvault"
 
 apply from: 'replaceTokenScript.gradle'
 apply from: 'publishScript.gradle'
