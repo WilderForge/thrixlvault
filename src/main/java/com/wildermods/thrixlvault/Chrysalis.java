@@ -48,7 +48,7 @@ import com.wildermods.masshash.utils.Reference;
  */
 public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	
-	static final Logger LOGGER = LogManager.getLogger();
+	protected static final Logger LOGGER = LogManager.getLogger();
 	
 	/**
 	 * Creates an empty {@code Chrysalis}. 
@@ -56,8 +56,11 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 * This constructor is used internally for cloning and for JSON deserialization.
 	 * Callers should use {@link #fromDir(Path)} to construct a Chrysalis from real data.
 	 * </p>
+	 * 
+	 * @deprecated Chrysalis should generally be created from a Vault
 	 */
-	Chrysalis() {
+	@Deprecated(forRemoval = false)
+	protected Chrysalis() {
 		// NO-OP
 	}
 	
@@ -73,13 +76,14 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 *   <li>stores the resulting hash→path mapping in a sorted, thread-safe multimap.</li>
 	 * </ul>
 	 * </p>
-	 *
+	 * @deprecated Chrysalis should generally be created from a Vault
 	 * @param dir the directory to walk and hash
 	 * @param forEachBlob a callback invoked for every {@link Blob} encountered; the wrapped
 	 *                    {@link Path} may be modified before being added to the result map
 	 * @throws IOException if file traversal or hashing fails
 	 */
-	Chrysalis(Path dir, BiConsumer<Reference<Path>, IBlob> forEachBlob) throws IOException {
+	@Deprecated(forRemoval = false)
+	protected Chrysalis(Path dir, BiConsumer<Reference<Path>, IBlob> forEachBlob) throws IOException {
 		super(Files.walk(dir), forEachBlob);
 	}
 
