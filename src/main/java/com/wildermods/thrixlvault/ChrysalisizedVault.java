@@ -376,7 +376,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @return {@code true} if the Chrysalis file exists
 	 */
 	public boolean hasChrysalis() {
-		return hasChrysalis(this);
+		return hasChrysalis(this, name);
 	}
 	
 	/**
@@ -385,7 +385,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @return the path to the chrysalis JSON file
 	 */
 	public Path getChrysalisFile() {
-		return getChrysalisFile(this);
+		return getChrysalisFile(this, name);
 	}
 	
 	public Path getBlobFile(Hash hash) {

@@ -64,7 +64,7 @@ public class Vault {
 	}
 	
 	public boolean hasChrysalis(IVaultable artifact, String name) {
-		return Files.exists(getChrysalisFile(artifact, name + ".json"));
+		return Files.exists(getChrysalisFile(artifact, name));
 	}
 
 	public Path getChrysalisFile(IVaultable artifact) {

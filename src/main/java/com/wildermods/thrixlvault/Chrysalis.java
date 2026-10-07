@@ -176,7 +176,7 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 		);
 
 		for(Hash key : this.blobs.keySet()) {
-			for(Path path : this.blobs.values()) {
+			for(Path path : this.blobs.get(key)) {
 				chrysalis.blobs.put(key, path);
 			}
 		}
