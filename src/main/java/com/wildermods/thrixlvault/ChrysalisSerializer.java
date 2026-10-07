@@ -79,18 +79,18 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 			String name = in.nextName();
 			if(name.equals("algorithm")) {
 				algorithm = in.nextString();
-				try {
-					ret.factory(new BlobFactory(
-						ByteUtil.consume.apply(MessageDigest.getInstance(algorithm))
-					));
-				} catch (NoSuchAlgorithmException e) {
-					throw new IOException(e);
-				}
-				
 			}
 			else {
 				throw new JsonParseException("Expected 'algorithm', got " + name);
 			}
+		}
+		
+		try {
+			ret.factory(new BlobFactory(
+				ByteUtil.consume.apply(MessageDigest.getInstance(algorithm))
+			));
+		} catch (NoSuchAlgorithmException e) {
+			throw new IOException(e);
 		}
 		
 		in.nextName();

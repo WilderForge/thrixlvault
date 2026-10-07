@@ -98,6 +98,13 @@ public class WeaverTests {
 	
 	@Test
 	@Order(1)
+	void testStateNotWeaved() throws IOException, IntegrityException {
+		weaver = new Weaver(vault, VERSION, sourceDir);
+		assertThrowsExactly(IllegalStateException.class, () -> weaver.verify());
+	}
+	
+	@Test
+	@Order(2)
 	void chrysalisSerializeTest() throws IOException {
 		System.out.println("Test is running...");
 		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir);
@@ -106,21 +113,23 @@ public class WeaverTests {
 	}
 	
 	@Test
-	@Order(2)
+	@Order(3)
 	void weaverTest() throws IOException, IntegrityException {
 		System.out.println("Weave test:");
 		weaver = new Weaver(vault, VERSION, sourceDir);
+		weaver.weave();
+		assertThrowsExactly(IllegalStateException.class, () -> weaver.weave());
 	}
 	
 	@Test
-	@Order(3)
+	@Order(4)
 	void databaseVerifyTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Verification test:");
 		weaver.verify();
 	}
 	
 	@Test
-	@Order(4)
+	@Order(5)
 	void databaseCorruptionTest() {
 	   	System.out.println("Corruption test:");
 	   	chrysalis = weaver.getChrysalisizedVault().chrysalis;
@@ -145,14 +154,15 @@ public class WeaverTests {
 	}
 	
 	@Test
-	@Order(5)
+	@Order(8)
 	void databaseOverwriteTest() throws IOException, IntegrityException {
 		System.out.println("Force overwrite test:");
 		weaver = new Weaver(vault, VERSION, sourceDir, true);
+		weaver.weave();
 	}
 	
 	@Test
-	@Order(6)
+	@Order(9)
 	void verifyOverwriteTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Overwrite Verification");
 		weaver.verify();
@@ -161,7 +171,7 @@ public class WeaverTests {
 	
 
 	@Test
-	@Order(7)
+	@Order(10)
 	@SuppressWarnings("unused")
 	void missingResourceTest() throws IOException {
 		Set<Hash> blobs = chrysalis.blobs().keySet();
@@ -179,13 +189,13 @@ public class WeaverTests {
 	}
 	
 	@Test
-	@Order(8)
+	@Order(11)
 	void overwriteRecreationTest() throws IOException, IntegrityException {
-		new Weaver(vault, VERSION, sourceDir, true);
+		new Weaver(vault, VERSION, sourceDir, true).weave();
 	}
 	
 	@Test
-	@Order(9)
+	@Order(12)
 	void verifyOverwriteRecreationTest() throws IntegrityException, IOException, InterruptedException, ExecutionException {
 		System.out.println("Overwrite recreation test");
 		weaver.verify();
@@ -193,19 +203,19 @@ public class WeaverTests {
 	}
 	
 	@Test
-	@Order(10)
+	@Order(13)
 	void serializationTest() {
 		Weaver.GSON.toJsonTree(chrysalis);
 	}
 	
 	@Test
-	@Order(11)
+	@Order(14)
 	void deserializationTest() {
 		Weaver.GSON.fromJson(Weaver.GSON.toJsonTree(chrysalis), Chrysalis.class);
 	}
 	
 	@Test
-	@Order(12)
+	@Order(15)
 	void deserializeManifestTest() throws JsonSyntaxException, JsonIOException, IOException, UnknownVersionException {
 		weaver.getChrysalisizedVault();
 		
@@ -226,17 +236,20 @@ public class WeaverTests {
 	}
 	
 	@Test
-	@Order(13)
+	@Order(16)
 	void osAssertions() throws IOException, IntegrityException {
 		
 		System.out.println("Weaving linux");
 		Weaver linux = new Weaver(new Vault(vaultDir.resolve(OS.LINUX.name())), VERSION, sourceDir);
+		linux.weave();
 		
 		System.out.println("Weaving windows");
 		Weaver windows = new Weaver(new Vault(vaultDir.resolve(OS.WINDOWS.name())), VERSION, sourceDir);
+		windows.weave();
 		
 		System.out.println("Weaving mac");
 		Weaver mac = new Weaver(new Vault(vaultDir.resolve(OS.MAC.name())), VERSION, sourceDir);
+		mac.weave();
 		
 		String jCurrent = Weaver.GSON.toJson(chrysalis);
 		

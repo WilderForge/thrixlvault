@@ -9,6 +9,7 @@ import java.util.function.BiConsumer;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.google.common.collect.ImmutableSetMultimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Ordering;
 import com.google.common.collect.SetMultimap;
@@ -49,6 +50,11 @@ import com.wildermods.masshash.utils.Reference;
 public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	
 	protected static final Logger LOGGER = LogManager.getLogger();
+	private static final SetMultimap<Hash, Path> EMPTY_SETMULTIMAP = ImmutableSetMultimap.of();
+	public static final Chrysalis EMPTY = new Chrysalis();
+	static {
+		EMPTY.blobs = EMPTY_SETMULTIMAP;
+	}
 	
 	/**
 	 * Creates an empty {@code Chrysalis}. 
@@ -162,6 +168,7 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	@Override
 	public Chrysalis clone() {
 		Chrysalis chrysalis = new Chrysalis();
+		chrysalis.factory(blobFactory);
 		
 		chrysalis.blobs = TreeMultimap.create(
 			Comparator.comparing(Hash::hash),

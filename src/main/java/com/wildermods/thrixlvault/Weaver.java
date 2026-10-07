@@ -39,7 +39,7 @@ import com.wildermods.thrixlvault.steam.IVaultable;
  * This class is designed to ensure blob integrity and can validate that all blobs referenced
  * in a manifest exist and are unmodified.
  */
-public class Weaver implements IVaultable {
+public class Weaver implements IWeaver {
 	
 	/** Gson instance for serializing Chrysalis manifests. */
 	public static final Gson GSON;
@@ -56,11 +56,13 @@ public class Weaver implements IVaultable {
 	/** The directory where blob files are stored. */
 	public static final Path BLOB_DIR = OUTPUT_DIR.resolve("blobs");
 	
-	private static final Logger LOGGER = LogManager.getLogger();
+	protected static final Logger LOGGER = LogManager.getLogger();
 	
-	private final ChrysalisizedVault vault;
-	private final IVaultable artifact;
-	private final Marker marker;
+	protected ChrysalisizedVault vault;
+	protected final IVaultable artifact;
+	protected final Marker marker;
+	
+	private final WeaveContext context;
 	
     /**
      * Constructs a new {@code Weaver} for the given vault and version string.
@@ -75,6 +77,10 @@ public class Weaver implements IVaultable {
 		this(vault, artifact, sourcesDir, false);
 	}
 	
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, String name) throws IOException, IntegrityException {
+		this(vault, artifact, sourcesDir, name, false);
+	}
+	
 
     /**
      * Constructs a new {@code Weaver} with the option to force overwrite an existing weaved version.
@@ -87,9 +93,17 @@ public class Weaver implements IVaultable {
      * @throws IntegrityException if an integrity violation occurs
      */
 	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, boolean force) throws IOException, IntegrityException {
-		this.artifact = artifact;
-		this.vault = weave(sourcesDir, vault, force);
-		this.marker = MarkerManager.getMarker(artifact.name());
+		this(new WeaveContext(vault, artifact, sourcesDir, "blobs", force));
+	}
+	
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, String name, boolean force) throws IOException, IntegrityException {
+		this(new WeaveContext(vault, artifact, sourcesDir, name, force));
+	}
+	
+	private Weaver(WeaveContext context) {
+		this.context = context;
+		this.marker = MarkerManager.getMarker(context.artifact.name());
+		this.artifact = context.artifact;
 	}
 	
 	public Weaver(Vault vault, IDownload download) throws IOException, IntegrityException {
@@ -109,13 +123,25 @@ public class Weaver implements IVaultable {
      * Verifies the integrity of all blobs in the weaved vault.
      * This method ensures that all blobs referenced in the manifest exist and are unmodified.
      *
+     * @Throws IllegalStateException if this weaver has not yet weaved
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if the version's integrity has been violated
      * @throws InterruptedException 
      * @throws ExecutionException 
      */
 	public void verify() throws IntegrityException, IOException, InterruptedException, ExecutionException {
+		if(vault == null) {
+			throw new IllegalStateException("Not yet weaved!");
+		}
 		vault.verifyBlobs();
+	}
+	
+	public ChrysalisizedVault weave() throws IOException, IntegrityException {
+		if(vault != null) {
+			throw new IllegalStateException("Already weaved!");
+		}
+		vault = weave(context);
+		return vault;
 	}
 	
     /**
@@ -133,9 +159,12 @@ public class Weaver implements IVaultable {
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if an integrity issue is found
      */
-	private ChrysalisizedVault weave(Path sourceDir, Vault vault, boolean force) throws IOException, IntegrityException {
-		if(!force && Files.exists(vault.getChrysalisFile(this))) {
-			throw new VersionAlreadyWeavedException(artifact.name() + " in " + vault.getChrysalisFile(this));
+	protected ChrysalisizedVault weave(WeaveContext context) throws IOException, IntegrityException {
+		final boolean force = context.force;
+		final String name = context.name;
+		final Path sourceDir = context.sourcesDir;
+		if(!force && Files.exists(context.vault.getChrysalisFile(this, name))) {
+			throw new VersionAlreadyWeavedException(artifact.name() + " in " + context.vault.getChrysalisFile(this, name));
 		}
 		
 		AtomicLong preExistingBlobs = new AtomicLong();
@@ -144,7 +173,7 @@ public class Weaver implements IVaultable {
 		final OpenOption[] openOptions = !force ? new StandardOpenOption[] {StandardOpenOption.CREATE_NEW} : new StandardOpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
 		final CopyOption[] copyOptions = !force ? new StandardCopyOption[0] : new StandardCopyOption[]{StandardCopyOption.REPLACE_EXISTING};
 		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (p, blob) -> {
-			Path blobPath = vault.blobDir.resolve(blob.hash());
+			Path blobPath = context.vault.blobDir.resolve(blob.hash());
 			p.set(sourceDir.relativize(p.get())); //set the path output to be relativized
 			final boolean exists = Files.exists(blobPath);
 			
@@ -182,7 +211,7 @@ public class Weaver implements IVaultable {
 		
 		//Serialize and write the chrysalis to the version-specific JSON file
 		try {
-			Path chrysalisFile = vault.getChrysalisFile(this);
+			Path chrysalisFile = context.vault.getChrysalisFile(this, name);
 			Path parent = chrysalisFile.getParent();
 			
 			if (parent != null && !Files.exists(parent)) {
@@ -194,7 +223,7 @@ public class Weaver implements IVaultable {
 			throw new IOException("Failed to write weaved data to JSON", e);
 		}
 		
-		return vault.chrysalisize(this);
+		return context.vault.chrysalisize(this, name);
 	}
 
 
@@ -212,5 +241,7 @@ public class Weaver implements IVaultable {
 	public IVaultable getArtifact() {
 		return artifact;
 	}
+	
+	protected static final record WeaveContext(Vault vault, IVaultable artifact, Path sourcesDir, String name, boolean force) {}
 	
 }

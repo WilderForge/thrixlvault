@@ -47,6 +47,10 @@ public class Vault {
 		return new ChrysalisizedVault(version, this);
 	}
 	
+	public ChrysalisizedVault chrysalisize(IVaultable version, String name) throws IOException, MissingVersionException {
+		return new ChrysalisizedVault(version, this, name);
+	}
+	
 	public Path getVaultDir() {
 		return vaultDir;
 	}
@@ -56,11 +60,19 @@ public class Vault {
 	}
 	
 	public boolean hasChrysalis(IVaultable artifact) {
-		return Files.exists(getChrysalisFile(artifact));
+		return hasChrysalis(artifact, "blobs");
+	}
+	
+	public boolean hasChrysalis(IVaultable artifact, String name) {
+		return Files.exists(getChrysalisFile(artifact, name + ".json"));
 	}
 
 	public Path getChrysalisFile(IVaultable artifact) {
-		return vaultDir.resolve(artifact.artifactPath()).resolve("blobs.json");
+		return getChrysalisFile(artifact, "blobs");
+	}
+	
+	public Path getChrysalisFile(IVaultable artifact, String name) {
+		return vaultDir.resolve(artifact.artifactPath()).resolve(name + ".json");
 	}
 	
 	@Override
