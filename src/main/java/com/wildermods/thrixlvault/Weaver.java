@@ -1,16 +1,24 @@
 package com.wildermods.thrixlvault;
 
 import java.io.IOException;
-import java.nio.file.CopyOption;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
+import java.util.Map;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
+import java.nio.file.FileAlreadyExistsException;
+import com.google.common.collect.TreeMultimap;
+import java.util.Comparator;
+import com.wildermods.masshash.BlobFactory;
+import com.wildermods.masshash.Hash;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicLong;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -46,6 +54,8 @@ public class Weaver implements IWeaver {
 	static {
 		GsonBuilder builder = new GsonBuilder();
 		builder.registerTypeAdapter(Chrysalis.class, new ChrysalisSerializer());
+		builder.registerTypeAdapter(VaultContext.class, new VaultContextSerializer().nullSafe());
+		builder.registerTypeAdapter(ChrysalisModification.class, new ChrysalisModificationSerializer().nullSafe());
 		builder.setPrettyPrinting().setFormattingStyle(FormattingStyle.PRETTY.withIndent("\t"));
 		GSON = builder.create();
 	}
@@ -167,48 +177,9 @@ public class Weaver implements IWeaver {
 			throw new VersionAlreadyWeavedException(artifact.name() + " in " + context.vault.getChrysalisFile(this, name));
 		}
 		
-		AtomicLong preExistingBlobs = new AtomicLong();
-		AtomicLong overwrittenBlobs = new AtomicLong();
-		final Set<Path> writtenBlobs = ConcurrentHashMap.newKeySet();
 		final OpenOption[] openOptions = !force ? new StandardOpenOption[] {StandardOpenOption.CREATE_NEW} : new StandardOpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
-		final CopyOption[] copyOptions = !force ? new StandardCopyOption[0] : new StandardCopyOption[]{StandardCopyOption.REPLACE_EXISTING};
-		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (p, blob) -> {
-			Path blobPath = context.vault.blobDir.resolve(blob.hash());
-			p.set(sourceDir.relativize(p.get())); //set the path output to be relativized
-			final boolean exists = Files.exists(blobPath);
-			
-			if(!force && exists) {
-				preExistingBlobs.addAndGet(1);
-			}
-			else {
-				try {
-					if(writtenBlobs.add(blobPath)) {
-						if(exists) {
-							overwrittenBlobs.addAndGet(1);
-						}
-						
-						Files.copy(blob.dataStream(), blobPath, copyOptions);
-					}
-					else {
-						LOGGER.warn(marker, "Skipping concurrent write of " + blobPath);
-					}
-				} catch (IOException e) {
-					throw new RuntimeException(e);
-				}
-			}
-		});
+		Chrysalis chrysalis = ingest(context.vault, sourceDir, new BlobFactory(), force);
 
-		LOGGER.info(marker, "");
-		LOGGER.info(marker, "===================WEAVER RESULTS===================");
-		LOGGER.info(marker, "Files found: " + chrysalis.blobs().keys().size());
-		LOGGER.info(marker, "Unique Blobs: " + chrysalis.blobs().keySet().size());
-		LOGGER.info(marker, "Duplicate Blobs " + (chrysalis.blobs().keys().size() - chrysalis.blobs().keySet().size()));
-		//LOGGER.info(marker, "PreExisting/Duplicate Blobs: " + preExistingBlobs);
-		LOGGER.info(marker, "Blobs overwritten: "+ overwrittenBlobs);
-		LOGGER.info(marker, "Blobs written: " + writtenBlobs.size());
-		LOGGER.info(marker, "====================================================");
-		LOGGER.info(marker, "");
-		
 		//Serialize and write the chrysalis to the version-specific JSON file
 		try {
 			Path chrysalisFile = context.vault.getChrysalisFile(this, name);
@@ -224,6 +195,100 @@ public class Weaver implements IWeaver {
 		}
 		
 		return context.vault.chrysalisize(this, name);
+	}
+
+
+	/**
+	 * Weaves a complete desired directory into a named modification. Missing parent
+	 * files become removals, including ignored files. Ignore and tag operations are
+	 * explicit. All scanned bytes enter the shared blob store before publishing JSON.
+	 * A null parent starts empty; an existing context is never overwritten.
+	 */
+	public static ChrysalisizedVault weaveModification(Vault vault, IVaultable artifact, String name,
+		String parent, Path directory, Set<Path> ignores, Set<Path> removeIgnores,
+		Set<String> tags, Set<String> removeTags) throws IOException, IntegrityException {
+		return weaveModification(vault, artifact, name, parent, directory, ignores, removeIgnores, tags, removeTags, false);
+	}
+
+	/** Replacing a declaration does not overwrite shared blobs. */
+	public static ChrysalisizedVault weaveModification(Vault vault, IVaultable artifact, String name,
+		String parent, Path directory, Set<Path> ignores, Set<Path> removeIgnores,
+		Set<String> tags, Set<String> removeTags, boolean replaceExisting) throws IOException, IntegrityException {
+		Vault.requireContextName(name);
+		if (name.equals("blobs")) throw new IllegalArgumentException("The default 'blobs' context must be a full snapshot");
+		if (!replaceExisting && vault.hasChrysalis(artifact, name)) {
+			throw new VersionAlreadyWeavedException(name + " in " + vault.getChrysalisFile(artifact, name));
+		}
+		Chrysalis base = parent == null ? Chrysalis.EMPTY.clone() : vault.chrysalisize(artifact, parent).getChrysalis();
+		String algorithm = base.getBlobFactory().algorithm();
+		ChrysalisModification metadata = new ChrysalisModification(algorithm, Map.of(), ignores, removeIgnores);
+		metadata.applyTo(base); // Check inherited ignore removals before storing bytes.
+		VaultContext declaration = VaultContext.modification(parent, metadata, tags, removeTags);
+		// Validate ancestry and tag declarations without publishing a file.
+		vault.validateContext(artifact, name, declaration);
+		Chrysalis desired = ingest(vault, directory, base.getBlobFactory(), false);
+		desired.setIgnoredPaths(base.getIgnoredPaths());
+		ChrysalisModification fileChanges = ChrysalisModification.between(base, desired);
+		ChrysalisModification modification = new ChrysalisModification(algorithm, fileChanges.changes(), ignores, removeIgnores);
+		return vault.saveModification(artifact, name, parent, modification, tags, removeTags, replaceExisting);
+	}
+
+	/** Hashes and stores a directory without creating an intermediate manifest. */
+	private static Chrysalis ingest(Vault vault, Path directory, BlobFactory factory, boolean force)
+		throws IOException, IntegrityException {
+		if (!Files.isDirectory(directory)) throw new IOException("Expected a source directory: " + directory);
+		List<Path> files;
+		try (var paths = Files.walk(directory)) {
+			files = paths.filter(Files::isRegularFile).toList();
+		}
+		Set<Path> processed = ConcurrentHashMap.newKeySet();
+		List<Callable<Map.Entry<Hash, Path>>> tasks = new ArrayList<>();
+		for (Path file : files) {
+			tasks.add(() -> {
+				Hash blob = BlobIO.hash(factory, file);
+				Path destination = vault.blobDir.resolve(blob.hash());
+				if (processed.add(destination)) {
+					if (!force && Files.exists(destination)) {
+						BlobIO.verify(factory, destination, blob);
+					} else {
+						Path staging = Files.createTempFile(vault.blobDir, ".weave-", ".tmp");
+						try {
+							Files.copy(file, staging, StandardCopyOption.REPLACE_EXISTING);
+							BlobIO.verify(factory, staging, blob);
+							try {
+								if (force) Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING);
+								else Files.move(staging, destination);
+							} catch (FileAlreadyExistsException race) {
+								BlobIO.verify(factory, destination, blob);
+							}
+						} finally {
+							Files.deleteIfExists(staging);
+						}
+					}
+				}
+				return Map.entry(blob, directory.relativize(file));
+			});
+		}
+		var blobs = TreeMultimap.<Hash, Path>create(Comparator.comparing(Hash::hash), Comparator.naturalOrder());
+		try (var executor = Executors.newFixedThreadPool(Math.max(1, Math.min(files.size(), Runtime.getRuntime().availableProcessors())))) {
+			for (var future : executor.invokeAll(tasks)) {
+				try {
+					var entry = future.get();
+					blobs.put(entry.getKey(), entry.getValue());
+				} catch (ExecutionException e) {
+					if (e.getCause() instanceof IOException io) throw io;
+					if (e.getCause() instanceof IntegrityException integrity) throw integrity;
+					throw new IOException("Failed to weave directory " + directory, e.getCause());
+				}
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IOException("Weaving interrupted", e);
+		}
+		Chrysalis result = Chrysalis.EMPTY.clone().factory(factory);
+		result.setBlobs(blobs);
+		LOGGER.info("Weaved {} files, {} unique blobs, {} duplicate paths", blobs.size(), blobs.keySet().size(), blobs.size() - blobs.keySet().size());
+		return result;
 	}
 
 

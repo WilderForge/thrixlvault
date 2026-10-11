@@ -24,14 +24,14 @@ import com.wildermods.masshash.utils.ByteUtil;
 
 public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 	
-	private static final int SCHEMA = 2;
+	private static final int SCHEMA = 3;
 	
 	@Override
 	public void write(JsonWriter out, Chrysalis value) throws IOException {
 		out.beginObject();
 		{
 			out.name("schema");
-			out.value(SCHEMA);
+			out.value(value.getIgnoredPaths().isEmpty() ? 2 : SCHEMA);
 			
 			out.name("algorithm");
 			out.value(value.getBlobFactory().algorithm());
@@ -49,6 +49,13 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 				}
 			}
 			out.endObject();
+			if (!value.getIgnoredPaths().isEmpty()) {
+				out.name("ignoredPaths").beginArray();
+				for (Path path : value.getIgnoredPaths().stream().sorted().toList()) {
+					out.value(path.toString().replace(path.getFileSystem().getSeparator(), "/"));
+				}
+				out.endArray();
+			}
 		}
 		out.endObject();
 	}
@@ -72,6 +79,9 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 		}
 		
 		String algorithm;
+		if (schema < 1 || schema > SCHEMA) {
+			throw new JsonParseException("Unsupported Chrysalis schema: " + schema);
+		}
 		if(schema == 1) {
 			 algorithm = "SHA-1";
 		}
@@ -120,6 +130,28 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 				sorted.putAll(entry.getKey(), entry.getValue());
 			}
 			ret.setBlobs(Multimaps.synchronizedSetMultimap(sorted));
+		}
+		if (schema == 3) {
+			if (!in.nextName().equals("ignoredPaths")) {
+				throw new JsonParseException("Expected ignoredPaths");
+			}
+			Set<Path> ignored = new HashSet<>();
+			in.beginArray();
+			while (in.hasNext()) {
+				String text = in.nextString();
+				try {
+					if (text.contains("\\")) {
+						throw new IllegalArgumentException("JSON paths must use '/'");
+					}
+					if (!ignored.add(ChrysalisModification.normalizePath(Path.of(text)))) {
+						throw new IllegalArgumentException("Duplicate ignore path");
+					}
+				} catch (IllegalArgumentException e) {
+					throw new JsonParseException("Invalid ignored path: " + text, e);
+				}
+			}
+			in.endArray();
+			ret.setIgnoredPaths(ignored);
 		}
 		in.endObject();
 		
