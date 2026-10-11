@@ -199,9 +199,20 @@ to choose their own behavior.
 
 `loadContext(artifact, name)` and `chrysalisize(artifact, name)` both return a
 resolved `ChrysalisizedVault`. `load(artifact, file)` accepts arbitrary JSON
-paths, resolving named parents from that artifact in the owning vault. Loading
-an external file does not register or save it as a named context. An external
-file can have the same filename as its named parent without creating a cycle.
+paths. Every parent is resolved by its local name to a sibling JSON file in the
+loaded declaration's directory; the entire chain stays in that directory.
+Loading an external file does not register or save it as a named context and
+never falls back to parents in the owning vault's artifact directory. The supplied
+vault still provides blob storage. A same-named context in a different vault or
+artifact directory is unrelated.
+
+Cycle detection tracks local filenames in an ordered set and throws
+`DatabaseVaultCircularityError` when one repeats. The error lists the traversed
+names, including the repeated filename. Validation runs on both load and save;
+a rejected save does not replace the previous declaration. A declaration whose
+parent has its own name is a self-cycle, even if another directory has a
+parentless context with that name. Parent names cannot contain directory
+components or drive prefixes.
 
 `saveModification` and `saveSnapshot` validate inheritance and hash preconditions
 before writing; all saves return the resolved view. Saves default to refusing
@@ -210,7 +221,8 @@ Saving a declaration does not produce or verify blob bytes.
 
 `loaded.saveAs("modded")` saves the loaded local declaration into the vault,
 preserving its parent reference, operations, and local tags instead of flattening
-resolved state. `saveAs(name, true)` explicitly replaces an existing declaration.
+resolved state. Saving into the vault resolves that parent name in the destination
+artifact directory; it never retains a dependency on the external directory. `saveAs(name, true)` explicitly replaces an existing declaration.
 Temporary `withModifications` views have no local declaration and cannot use
 `saveAs`; persist their resolved state using `saveSnapshot` instead. Standalone
 patch `toFile` is deprecated; it omits the parent and tags.

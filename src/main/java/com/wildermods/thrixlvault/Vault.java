@@ -8,7 +8,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.List;
+import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 
@@ -63,14 +63,17 @@ public class Vault {
 
 	/** Loads only the local declaration; does not resolve or verify its parent. */
 	VaultContext readDeclaration(IVaultable artifact, String name) throws IOException, MissingVersionException {
-		Path file = getChrysalisFile(artifact, name);
+		VaultContext context = readDeclaration(artifact, getChrysalisFile(artifact, name));
+		checkDefault(name, context);
+		return context;
+	}
+
+	private VaultContext readDeclaration(IVaultable artifact, Path file) throws IOException, MissingVersionException {
 		try (var reader = Files.newBufferedReader(file)) {
-			VaultContext context = Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class),
+			return Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class),
 				"Context contains null: " + file);
-			checkDefault(name, context);
-			return context;
 		} catch (NoSuchFileException e) {
-			throw new MissingVersionException(artifact + " context '" + name + "' at " + file, e);
+			throw new MissingVersionException(artifact + " context at " + file, e);
 		}
 	}
 
@@ -126,22 +129,20 @@ public class Vault {
 	}
 
 	/**
-	 * Loads any supported JSON declaration using this vault for blobs and named parents.
+	 * Loads a JSON declaration using this vault for blobs. Every named parent must
+	 * be a sibling JSON file in the same directory as the loaded declaration.
 	 * An external file is not registered or saved in the vault by loading it.
 	 */
 	public ChrysalisizedVault load(IVaultable artifact, Path file) throws IOException, MissingVersionException {
 		Path source = file.toAbsolutePath().normalize();
 		String filename = source.getFileName().toString();
 		String name = filename.endsWith(".json") ? filename.substring(0, filename.length() - 5) : filename;
+		requireContextName(name);
 		boolean named = source.getParent().equals(getChrysalisFile(artifact).toAbsolutePath().normalize().getParent())
 			&& filename.endsWith(".json");
 		if (named) return chrysalisize(artifact, name);
-		VaultContext declaration;
-		try (var reader = Files.newBufferedReader(source)) {
-			declaration = Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class), "Null declaration: " + source);
-		}
 		return new ChrysalisizedVault(artifact, this, name,
-			resolveContext(artifact, name, declaration, source, false));
+			resolveContext(artifact, name, null, source, false));
 	}
 
 	public ChrysalisizedVault saveModification(IVaultable artifact, String name, String parent,
@@ -170,28 +171,29 @@ public class Vault {
 
 	private ResolvedContext resolveContext(IVaultable artifact, String name, VaultContext proposed, Path source, boolean named)
 		throws IOException, MissingVersionException {
-		// Use source identities: an external file may share a name with a vault parent.
+		// A relationship is a local context name, never a path to another directory.
+		Path directory = source.getParent();
 		var layers = new ArrayList<ContextLayer>();
-		List<Path> seen = new ArrayList<>();
+		Set<String> seen = new LinkedHashSet<>();
 		String current = name;
 		Path currentFile = source;
-		boolean currentNamed = named;
 		while (current != null) {
-			if (!seen.add(currentFile.toAbsolutePath().normalize())) {
-				String[] cycle = new String[seen.size() + 1];
-				for(int i = 0; i < seen.size(); i++) {
-					cycle[i] = seen.get(i).toAbsolutePath().normalize().getFileName().toString();
-				}
-				cycle[cycle.length - 1] = currentFile.toAbsolutePath().normalize().getFileName().toString();
-				throw new DatabaseVaultCircularityError(this, cycle);
+			requireContextName(current);
+			// Track filenames so an arbitrary JSON file without a .json extension
+			// can still refer to a distinct sibling named <context>.json.
+			String filename = currentFile.getFileName().toString();
+			if (!seen.add(filename)) {
+				var cycle = new ArrayList<>(seen);
+				cycle.add(filename);
+				throw new DatabaseVaultCircularityError(this, cycle.toArray(String[]::new));
 			}
-			VaultContext declaration = layers.isEmpty() && proposed != null ? proposed : readDeclaration(artifact, current);
-			if (currentNamed) checkDefault(current, declaration);
-			layers.add(new ContextLayer(current, currentFile, currentNamed, declaration));
+			VaultContext declaration = layers.isEmpty() && proposed != null ? proposed : readDeclaration(artifact, currentFile);
+			if (named) checkDefault(current, declaration);
+			layers.add(new ContextLayer(current, declaration));
 			current = declaration.parent();
-			if (current != null) currentFile = getChrysalisFile(artifact, current);
-			currentNamed = true;
+			if (current != null) currentFile = directory.resolve(requireContextName(current) + ".json");
 		}
+
 		Collections.reverse(layers);
 		Chrysalis result = null;
 		Set<String> tags = new HashSet<>();
@@ -215,13 +217,14 @@ public class Vault {
 			}
 			tags.removeAll(declaration.removeTags());
 			tags.addAll(declaration.tags());
-			resolved = new ResolvedContext(result, Set.copyOf(tags), declaration, parent, layer.file(), layer.named());
+			Path file = index == layers.size() - 1 ? source : directory.resolve(layer.name() + ".json");
+			resolved = new ResolvedContext(result, Set.copyOf(tags), declaration, parent, file, named);
 			if (index < layers.size() - 1) parent = new ChrysalisizedVault(artifact, this, layer.name(), resolved);
 		}
 		return resolved;
 	}
 
-	private record ContextLayer(String name, Path file, boolean named, VaultContext declaration) {}
+	private record ContextLayer(String name, VaultContext declaration) {}
 
 	private static void checkDefault(String name, VaultContext context) {
 		if (name.equals("blobs") && !context.isSnapshot()) {

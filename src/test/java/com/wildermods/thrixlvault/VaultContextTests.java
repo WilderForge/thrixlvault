@@ -14,6 +14,7 @@ import com.google.gson.JsonParseException;
 import com.wildermods.masshash.BlobFactory;
 import com.wildermods.masshash.Hash;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
+import com.wildermods.thrixlvault.exception.DatabaseVaultCircularityError;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
 class VaultContextTests {
@@ -95,12 +96,12 @@ class VaultContextTests {
 		var f = fixture();
 		assertThrows(MissingVersionException.class, () -> f.vault.saveModification(ARTIFACT, "missing", "absent", builder().build()));
 		assertFalse(f.vault.hasChrysalis(ARTIFACT, "missing"));
-		assertThrows(IllegalArgumentException.class, () -> f.vault.saveModification(ARTIFACT, "self", "self", builder().build()));
+		assertThrows(DatabaseVaultCircularityError.class, () -> f.vault.saveModification(ARTIFACT, "self", "self", builder().build()));
 		assertFalse(f.vault.hasChrysalis(ARTIFACT, "self"));
 		f.vault.saveModification(ARTIFACT, "a", "blobs", builder().build());
 		f.vault.saveModification(ARTIFACT, "b", "a", builder().build());
 		String previous = Files.readString(f.vault.getChrysalisFile(ARTIFACT, "a"));
-		assertThrows(IllegalArgumentException.class, () -> f.vault.saveContext(ARTIFACT, "a",
+		assertThrows(DatabaseVaultCircularityError.class, () -> f.vault.saveContext(ARTIFACT, "a",
 			VaultContext.modification("b", builder().build(), Set.of(), Set.of()), true));
 		assertEquals(previous, Files.readString(f.vault.getChrysalisFile(ARTIFACT, "a")));
 		assertThrows(IllegalArgumentException.class, () -> f.vault.saveContext(ARTIFACT, "a",
@@ -111,7 +112,7 @@ class VaultContextTests {
 			VaultContext.modification("y", builder().build(), Set.of(), Set.of())));
 		Files.writeString(f.vault.getChrysalisFile(ARTIFACT, "y"), Weaver.GSON.toJson(
 			VaultContext.modification("x", builder().build(), Set.of(), Set.of())));
-		assertThrows(IllegalArgumentException.class, () -> f.vault.chrysalisize(ARTIFACT, "x"));
+		assertThrows(DatabaseVaultCircularityError.class, () -> f.vault.chrysalisize(ARTIFACT, "x"));
 	}
 
 	@Test

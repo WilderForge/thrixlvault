@@ -164,8 +164,8 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	public ChrysalisizedVault getChild(String name) throws IOException, MissingVersionException {
 		if (!namedContext) throw new IllegalStateException("Only a named vault context can load a child");
 		ChrysalisizedVault child = owningVault.chrysalisize(artifact, name);
-		ChrysalisizedVault parent = child.inheritedParent;
-		if (parent == null || !parent.sourceFile.toAbsolutePath().normalize().equals(sourceFile.toAbsolutePath().normalize())) {
+		// Loading through this owner and artifact fixes the directory; compare local names.
+		if (!this.name.equals(child.context.parent())) {
 			throw new IllegalArgumentException("Context '" + name + "' is not an immediate child of '" + this.name + "'");
 		}
 		return child;
