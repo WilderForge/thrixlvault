@@ -277,5 +277,6 @@ failure, and existing declarations are retained until the final save.
 The overload ending in `replaceExisting` permits replacing the declaration;
 it never overwrites shared blob content. Ordinary full weaving retains its
 existing `force` behavior for repairing stored blobs. The built-in verification
-and ingestion use the context's declared algorithm with independent digests for
-concurrent tasks.
+and ingestion use MassHash 2.1.5.1 directly with the context's declared algorithm.
+MassHash supplies fresh digests for concurrent calls and closes hashing streams,
+including when digest creation fails. The local `BlobIO` workaround has been removed.

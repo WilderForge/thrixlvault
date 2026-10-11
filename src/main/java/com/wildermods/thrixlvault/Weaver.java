@@ -245,21 +245,21 @@ public class Weaver implements IWeaver {
 		List<Callable<Map.Entry<Hash, Path>>> tasks = new ArrayList<>();
 		for (Path file : files) {
 			tasks.add(() -> {
-				Hash blob = BlobIO.hash(factory, file);
+				Hash blob = factory.blob(file);
 				Path destination = vault.blobDir.resolve(blob.hash());
 				if (processed.add(destination)) {
 					if (!force && Files.exists(destination)) {
-						BlobIO.verify(factory, destination, blob);
+						factory.blob(destination, blob).verify();
 					} else {
 						Path staging = Files.createTempFile(vault.blobDir, ".weave-", ".tmp");
 						try {
 							Files.copy(file, staging, StandardCopyOption.REPLACE_EXISTING);
-							BlobIO.verify(factory, staging, blob);
+							factory.blob(staging, blob).verify();
 							try {
 								if (force) Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING);
 								else Files.move(staging, destination);
 							} catch (FileAlreadyExistsException race) {
-								BlobIO.verify(factory, destination, blob);
+								factory.blob(destination, blob).verify();
 							}
 						} finally {
 							Files.deleteIfExists(staging);

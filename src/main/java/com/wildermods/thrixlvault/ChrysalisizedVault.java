@@ -237,11 +237,9 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 					throw err;
 				}
 				
-				try {
-					BlobIO.verify(factory, blobFile, hash);
-				}
-				catch(IntegrityException e) {
-					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage(), e);
+				IntegrityProblem problem = factory.blob(blobFile, hash).check();
+				if (problem != null) {
+					throw new DatabaseIntegrityError("Corrupted blob - " + problem.getMessage());
 				}
 			}
 			catch (Throwable t) {
@@ -311,7 +309,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 					throw new MissingResourceException("Missing Resource - " + hash + " (" + resource + ")", () -> resource);
 				}
 				try {
-					BlobIO.verify(factory, resource, hash);
+					factory.blob(resource, hash).verify();
 				}
 				catch(Throwable t) {
 					if(t instanceof IntegrityException) {

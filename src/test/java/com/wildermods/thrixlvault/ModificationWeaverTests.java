@@ -86,6 +86,21 @@ class ModificationWeaverTests {
 		result.verifyDirectory(source);
 	}
 
+	@Test void parallelSha256WeavingAndVerificationUseIndependentDigests() throws Exception {
+		Vault vault = new Vault(temp.resolve("vault"));
+		vault.saveSnapshot(ARTIFACT, "base", Chrysalis.EMPTY.clone().factory(new BlobFactory("SHA-256")), Set.of());
+		Path source = directory("source");
+		for (int i = 0; i < 128; i++) file(source, "files/" + i, ("content-" + i + "\n").repeat(4096));
+		var result = weave(vault, "modded", "base", source);
+		assertEquals(128, result.getChrysalis().blobs().keySet().size());
+		for (int i = 0; i < 128; i++) {
+			Path relative = Path.of("files", Integer.toString(i));
+			var expected = new BlobFactory("SHA-256").blob(source.resolve(relative));
+			assertTrue(result.getChrysalis().blobs().containsEntry(expected, relative));
+		}
+		result.verifyDirectory(source);
+	}
+
 	@Test void validationFailuresDoNotPublishOrStoreNewBytesAndOverwriteIsExplicit() throws Exception {
 		Vault vault = new Vault(temp.resolve("vault"));
 		vault.saveSnapshot(ARTIFACT, "blobs", Chrysalis.EMPTY.clone(), Set.of());
