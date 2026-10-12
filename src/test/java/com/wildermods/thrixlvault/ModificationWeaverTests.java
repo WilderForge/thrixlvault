@@ -16,7 +16,7 @@ class ModificationWeaverTests {
 	@TempDir Path temp;
 	private static final IVaultable ARTIFACT = ChrysalisNavigationTests.ARTIFACT;
 	private ChrysalisizedVault weave(Vault vault, String name, String parent, Path directory) throws Exception {
-		return Weaver.weaveModification(vault, ARTIFACT, name, parent, directory, Set.of(), Set.of(), Set.of(), Set.of());
+		return new Weaver(vault, ARTIFACT, directory).name(name).parent(parent).weave();
 	}
 	private Path directory(String name) throws Exception { return Files.createDirectory(temp.resolve(name)); }
 	private void file(Path directory, String name, String content) throws Exception {
@@ -52,8 +52,9 @@ class ModificationWeaverTests {
 		var ignored = ChrysalisModification.builder("SHA-1").ignore(Path.of("cache")).build().applyTo(base.getChrysalis());
 		vault.saveSnapshot(ARTIFACT, "base", ignored, Set.of("inherited"));
 		file(source, "cache/data", "changed"); file(source, "hidden/data", "hidden");
-		var child = Weaver.weaveModification(vault, ARTIFACT, "modded", "base", source,
-			Set.of(Path.of("hidden")), Set.of(Path.of("cache")), Set.of("strict"), Set.of("inherited"));
+		var child = new Weaver(vault, ARTIFACT, source).name("modded").parent("base")
+			.ignore(Path.of("hidden")).removeIgnore(Path.of("cache"))
+			.tag("strict").removeTag("inherited").weave();
 		assertFalse(child.getChrysalis().isIgnored(Path.of("cache/data")));
 		assertTrue(child.getChrysalis().isIgnored(Path.of("hidden/data")));
 		assertEquals(Set.of("strict"), child.getTags());
@@ -105,8 +106,8 @@ class ModificationWeaverTests {
 		Vault vault = new Vault(temp.resolve("vault"));
 		vault.saveSnapshot(ARTIFACT, "blobs", Chrysalis.EMPTY.clone(), Set.of());
 		Path source = directory("source"); file(source, "file", "content");
-		assertThrows(IllegalArgumentException.class, () -> Weaver.weaveModification(vault, ARTIFACT, "invalid", "blobs", source,
-			Set.of(), Set.of(Path.of("not-ignored")), Set.of(), Set.of()));
+		assertThrows(IllegalArgumentException.class, () -> new Weaver(vault, ARTIFACT, source)
+			.name("invalid").parent("blobs").removeIgnore(Path.of("not-ignored")).weave());
 		assertFalse(vault.hasChrysalis(ARTIFACT, "invalid"));
 		try (var files = Files.list(vault.blobDir)) { assertEquals(0, files.count()); }
 		weave(vault, "modded", "blobs", source);
@@ -114,8 +115,7 @@ class ModificationWeaverTests {
 		file(source, "file", "changed");
 		assertThrows(VersionAlreadyWeavedException.class, () -> weave(vault, "modded", "blobs", source));
 		assertEquals(previous, Files.readString(vault.getChrysalisFile(ARTIFACT, "modded")));
-		var replaced = Weaver.weaveModification(vault, ARTIFACT, "modded", "blobs", source,
-			Set.of(), Set.of(), Set.of(), Set.of(), true);
+		var replaced = new Weaver(vault, ARTIFACT, source).name("modded").parent("blobs").force(true).weave();
 		replaced.verifyDirectory(source);
 	}
 

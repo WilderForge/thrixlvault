@@ -227,7 +227,9 @@ public class WeaverTests {
 		String chrysalisJson = Weaver.GSON.toJson(chrysalis);
 
 		assertTrue(chrysalisJson.equals(Weaver.GSON.toJson(deserialized)));
-		assertTrue(chrysalisJson.equals(Files.readString(manifest)));
+		var declaration = Weaver.GSON.fromJson(Files.readString(manifest), VaultContext.class);
+		assertTrue(declaration.isSnapshot());
+		assertTrue(chrysalisJson.equals(Weaver.GSON.toJson(declaration.snapshot().orElseThrow())));
 		for(Hash hash : chrysalis.blobs().keySet()) {
 			assertTrue(chrysalisJson.contains(hash.hash()), "Hash string not found in serialized manifest!: " + hash);
 		}

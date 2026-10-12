@@ -141,7 +141,8 @@ other named declarations sharing one vault blob store. `chrysalisize(artifact)`
 loads `blobs`; `chrysalisize(artifact, name)` loads and resolves that context.
 `blobs` is reserved for a full snapshot. Names have no file extension or path
 components. Existing untyped full manifests (schemas 0 through 3) remain readable;
-Weaver continues writing its existing full-manifest format.
+Weaver writes both snapshots and modifications using the versioned context
+envelope, preserving local tags and ignore roots.
 
 An internal declaration contains either a snapshot or a modification plus local metadata.
 The public loading result is always `ChrysalisizedVault`, which binds the resolved
@@ -247,17 +248,44 @@ contexts, unrelated contexts, and grandchildren are rejected. The method does
 not create or reparent anything. External files and temporary compositions cannot
 serve as named parents until saved. JSON has no persisted children list.
 
-## Weaving a modification from a complete directory
+## Fluent weaving of snapshots and modifications
+
+The existing constructors remain convenience defaults for new versions:
 
 ```java
-ChrysalisizedVault modded = Weaver.weaveModification(
-    vault, artifact, "modded", "blobs", completeModdedDirectory,
-    Set.of(Path.of("cache")),       // ignore additions
-    Set.of(Path.of("logs")),        // remove inherited explicit ignores
-    Set.of("vendor:custom"),        // local tags
-    Set.of("strict")               // remove inherited tags
-);
+ChrysalisizedVault blobs = new Weaver(vault, artifact, completeDirectory).weave();
 ```
+
+Configure `Weaver` directly before calling `weave()`:
+
+```java
+ChrysalisizedVault blobs = new Weaver(vault, artifact, completeDirectory)
+    .ignore(Path.of("cache"))
+    .tag("strict", "vendor:custom")
+    .weave();
+
+ChrysalisizedVault modded = new Weaver(vault, artifact, completeModdedDirectory)
+    .name("modded")
+    .parent("blobs")
+    .ignore(Path.of("logs"))
+    .removeIgnore(Path.of("cache"))
+    .tag("modded")
+    .removeTag("strict")
+    .weave();
+```
+
+`name`, `parent`, and `force` replace their previous setting; ignore and tag
+methods accumulate entries and accept multiple arguments. Repeated entries are
+idempotent, and ignore paths are normalized. The methods return the same `Weaver`.
+Constructor arguments for name and force remain supported, as does the `IDownload`
+constructor. The no-argument `name()` still identifies the wrapped artifact.
+
+No parent, including an explicit `parent(null)`, produces a standalone snapshot,
+even if the output name is `modded`. There is no implicit inheritance from `blobs`.
+An explicit parent produces a modification. `blobs` is reserved for a standalone
+snapshot and can have its own ignores and tags. The former static
+`weaveModification` API has been removed; hashing and blob ingestion are instance
+operations used by the shared `weave()` workflow.
 
 The directory is the **complete desired file set**, not a directory containing
 only changed files. Every omitted parent path becomes a removal, including raw
@@ -266,17 +294,30 @@ many paths are diffed automatically. Files under ignored roots are also hashed
 and stored, allowing a later `removeIgnore` to restore their expectations.
 Explicit ignore operations are preserved even when an addition is redundant.
 
-Weaving uses the parent's hashing algorithm, or SHA-1 with a null parent. It
-streams files, hashes in parallel, deduplicates stored content, and verifies
-reused and newly copied blobs. It supports empty directories. Only after every
-required blob has been stored successfully does it save the modification JSON;
-no intermediate snapshot file is written. Validation or storage failure leaves
-no new declaration. Successfully stored but unreferenced blobs can remain after
-failure, and existing declarations are retained until the final save.
+Ignore removals require an exact inherited root. A parentless snapshot therefore
+cannot remove an ignore. Removing an absent tag is harmless; tag removals without
+a parent have no effect and are omitted from the snapshot declaration. Adding
+and removing the same ignore root or tag in one layer is rejected. Metadata and
+ancestry are validated before storing bytes.
 
-The overload ending in `replaceExisting` permits replacing the declaration;
-it never overwrites shared blob content. Ordinary full weaving retains its
-existing `force` behavior for repairing stored blobs. The built-in verification
-and ingestion use MassHash 2.1.5.1 directly with the context's declared algorithm.
-MassHash supplies fresh digests for concurrent calls and closes hashing streams,
-including when digest creation fails. The local `BlobIO` workaround has been removed.
+Weaving uses the parent's hashing algorithm, or SHA-1 without a parent. It streams
+files, hashes in parallel, deduplicates content, verifies reused and newly copied
+blobs, and supports empty directories. JSON is saved only after all required bytes
+have been stored successfully; no intermediate manifest is written. Successfully
+stored but unreferenced blobs can remain after failure.
+
+Output declarations are not replaced by default. `force(true)` permits replacing
+the selected declaration. For standalone snapshots, force also repairs stored
+blobs, preserving the behavior of the existing force constructors. For child
+modifications, force verifies and reuses shared blobs without overwriting them.
+Both outputs use the versioned context JSON envelope; older formats remain readable.
+
+Configuration becomes immutable when `weave()` first starts. Mutators and a second
+concurrent weave are rejected. If weaving fails, the same instance may retry with
+its frozen configuration; create a new instance to change settings. Successful
+weaving leaves its result available through `getChrysalisizedVault()`, and a
+second successful weave is rejected as before.
+
+Verification and ingestion use MassHash 2.1.5.1 directly with the declared
+algorithm. MassHash supplies fresh digests for concurrent calls and closes hashing
+streams, including when digest creation fails.
