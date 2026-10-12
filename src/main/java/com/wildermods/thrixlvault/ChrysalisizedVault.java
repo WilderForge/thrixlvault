@@ -70,7 +70,8 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	private final Vault owningVault;
 	private final ChrysalisizedVault inheritedParent;
 	private final Path sourceFile;
-	private final boolean namedContext;
+	/** Whether this declaration belongs to the owning vault's artifact directory. */
+	private final boolean owned;
 	
 	
 	/**
@@ -121,7 +122,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	}
 
 	private ChrysalisizedVault(IVaultable artifact, Vault parent, String name, Chrysalis chrysalis,
-		Set<String> tags, VaultContext context, ChrysalisizedVault inheritedParent, Path sourceFile, boolean namedContext) throws IOException {
+		Set<String> tags, VaultContext context, ChrysalisizedVault inheritedParent, Path sourceFile, boolean owned) throws IOException {
 		super(parent.vaultDir);
 		this.chrysalis = Objects.requireNonNull(chrysalis, "chrysalis");
 		this.name = name;
@@ -131,7 +132,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		this.context = context;
 		this.inheritedParent = inheritedParent;
 		this.sourceFile = sourceFile;
-		this.namedContext = namedContext;
+		this.owned = owned;
 		this.owningVault = parent instanceof ChrysalisizedVault view ? view.getVault() : parent;
 	}
 
@@ -162,7 +163,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 
 	/** Loads an existing named context whose immediate declared parent is this context. */
 	public ChrysalisizedVault getChild(String name) throws IOException, MissingVersionException {
-		if (!namedContext) throw new IllegalStateException("Only a named vault context can load a child");
+		if (!owned) throw new IllegalStateException("Only a named vault context can load a child");
 		ChrysalisizedVault child = owningVault.chrysalisize(artifact, name);
 		// Loading through this owner and artifact fixes the directory; compare local names.
 		if (!this.name.equals(child.context.parent())) {
