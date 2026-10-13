@@ -72,7 +72,7 @@ public class Weaver implements IWeaver {
 	
 	protected static final Logger LOGGER = LogManager.getLogger();
 	
-	protected volatile ChrysalisizedVault vault;
+	protected ChrysalisizedVault vault;
 	protected final IVaultable artifact;
 	protected final Marker marker;
 	
@@ -141,14 +141,14 @@ public class Weaver implements IWeaver {
 	}
 	
 	/** Selects the output declaration name; defaults to {@code blobs}. */
-	public synchronized Weaver name(String name) {
+	public Weaver name(String name) {
 		ensureConfigurable();
 		this.contextName = Vault.requireContextName(name);
 		return this;
 	}
 
 	/** Selects a parent in the same artifact directory; null produces a full snapshot. */
-	public synchronized Weaver parent(String name) {
+	public Weaver parent(String name) {
 		ensureConfigurable();
 		this.parentName = name == null ? null : Vault.requireContextName(name);
 		return this;
@@ -159,35 +159,35 @@ public class Weaver implements IWeaver {
 	 * repairs stored blobs, matching the existing force constructors. Child weaving
 	 * verifies and reuses shared blobs without overwriting them.
 	 */
-	public synchronized Weaver force(boolean force) {
+	public Weaver force(boolean force) {
 		ensureConfigurable();
 		this.force = force;
 		return this;
 	}
 
 	/** Adds explicit ignore roots. Their bytes are still stored for later restoration. */
-	public synchronized Weaver ignore(Path... paths) {
+	public Weaver ignore(Path... paths) {
 		ensureConfigurable();
 		ignores.addAll(normalizePaths(paths));
 		return this;
 	}
 
 	/** Removes exact inherited ignore roots; roots must exist in the parent. */
-	public synchronized Weaver removeIgnore(Path... paths) {
+	public Weaver removeIgnore(Path... paths) {
 		ensureConfigurable();
 		removeIgnores.addAll(normalizePaths(paths));
 		return this;
 	}
 
 	/** Adds local tags; unknown tags are preserved. */
-	public synchronized Weaver tag(String... tags) {
+	public Weaver tag(String... tags) {
 		ensureConfigurable();
 		this.tags.addAll(validateTags(tags));
 		return this;
 	}
 
 	/** Subtracts inherited tags; removing an absent tag is harmless. */
-	public synchronized Weaver removeTag(String... tags) {
+	public Weaver removeTag(String... tags) {
 		ensureConfigurable();
 		removeTags.addAll(validateTags(tags));
 		return this;
@@ -244,14 +244,12 @@ public class Weaver implements IWeaver {
 	 * this method first starts. Failed weaving may be retried with that same configuration.
 	 */
 	public ChrysalisizedVault weave() throws IOException, IntegrityException {
-		synchronized (this) {
-			if (vault != null || weaving) throw new IllegalStateException("Already weaved or weaving");
-			if (frozenContext == null) {
-				frozenContext = new WeaveContext(context.vault, artifact, context.sourcesDir, contextName, force,
-					parentName, ignores, removeIgnores, tags, removeTags);
-			}
-			weaving = true;
+		if (vault != null || weaving) throw new IllegalStateException("Already weaved or weaving");
+		if (frozenContext == null) {
+			frozenContext = new WeaveContext(context.vault, artifact, context.sourcesDir, contextName, force,
+				parentName, ignores, removeIgnores, tags, removeTags);
 		}
+		weaving = true;
 		try {
 			vault = weave(frozenContext);
 			return vault;
