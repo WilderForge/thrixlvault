@@ -1,5 +1,4 @@
 package com.wildermods.thrixlvault;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,10 +29,6 @@ public class ChrysalisManifestModTest {
             "Desktop",
             "CHRYSALIS-MANIFEST-MODTEST"
         );
-
-        if (Files.exists(destination)) {
-            throw new FileAlreadyExistsException(destination.toString());
-        }
 
         Path temporary = Files.createTempDirectory(
             "chrysalis-manifest-modtest-"

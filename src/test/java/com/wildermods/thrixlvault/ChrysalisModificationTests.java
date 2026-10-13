@@ -115,7 +115,8 @@ class ChrysalisModificationTests {
 		assertThrows(IllegalArgumentException.class, () -> builder.add(Path.of("file"), replacement));
 		assertThrows(IllegalArgumentException.class, () -> new Change(Operation.ADD, original, replacement));
 		assertThrows(IllegalArgumentException.class, () -> new Change(Operation.REMOVE, original, replacement));
-		assertThrows(NullPointerException.class, () -> new Change(Operation.REPLACE, null, replacement));
+		assertNull(new Change(Operation.REPLACE, null, replacement).expected());
+		assertThrows(NullPointerException.class, () -> builder.replace(Path.of("missing"), null, replacement));
 		assertThrows(UnsupportedOperationException.class, () -> builder.build().changes().clear());
 		assertEquals(1, builder.build().changes().size());
 		ChrysalisModification built = builder.build();

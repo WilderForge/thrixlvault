@@ -126,7 +126,7 @@ class ChrysalisIgnoreTests {
 		assertEquals(patch.ignoredPaths(), ignored.getIgnoredPaths());
 		assertEquals(ignored, ignored.clone());
 		String json = Weaver.GSON.toJson(ignored);
-		assertTrue(json.contains("\"schema\": 3"));
+		assertTrue(json.contains("\"schema\": 4"));
 		Chrysalis loaded = Weaver.GSON.fromJson(json, Chrysalis.class);
 		assertEquals(ignored, loaded);
 		assertEquals(1, loaded.activeBlobs().size());
@@ -136,7 +136,7 @@ class ChrysalisIgnoreTests {
 		var unignore = builder(f.base).removeIgnore(Path.of("cache")).removeIgnore(Path.of("missing/file")).build();
 		var parsedUnignore = Weaver.GSON.fromJson(Weaver.GSON.toJson(unignore), ChrysalisModification.class);
 		assertEquals(f.base.getChrysalis(), parsedUnignore.applyTo(loaded));
-		assertTrue(Weaver.GSON.toJson(f.base.getChrysalis()).contains("\"schema\": 2"));
+		assertTrue(Weaver.GSON.toJson(f.base.getChrysalis()).contains("\"schema\": 4"));
 		assertTrue(Weaver.GSON.fromJson(Weaver.GSON.toJson(f.base.getChrysalis()), Chrysalis.class)
 			.getIgnoredPaths().isEmpty());
 	}

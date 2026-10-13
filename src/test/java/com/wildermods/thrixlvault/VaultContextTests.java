@@ -71,7 +71,10 @@ class VaultContextTests {
 		assertEquals(1, standalone.getChrysalis().blobs().size());
 		assertEquals(Set.of("custom"), standalone.getTags());
 		var json = Weaver.GSON.toJsonTree(vault.readDeclaration(ARTIFACT, "standalone")).getAsJsonObject();
-		assertFalse(json.has("parent"));
+		assertTrue(json.get("parent").isJsonNull());
+		json.remove("parent");
+		Files.writeString(vault.getChrysalisFile(ARTIFACT, "missing-parent"), json.toString());
+		assertTrue(vault.chrysalisize(ARTIFACT, "missing-parent").getParent().isEmpty());
 		json.add("parent", com.google.gson.JsonNull.INSTANCE);
 		Files.writeString(vault.getChrysalisFile(ARTIFACT, "null-parent"), json.toString());
 		assertEquals(standalone.getChrysalis(), vault.chrysalisize(ARTIFACT, "null-parent").getChrysalis());
@@ -86,7 +89,7 @@ class VaultContextTests {
 		assertEquals(ignored, Chrysalis.fromFile(saved.getChrysalisFile()));
 		assertEquals(Set.of("opaque:tag"), f.vault.chrysalisize(ARTIFACT, "snapshot").getTags());
 		var context = saved.getContext().orElseThrow();
-		assertTrue(context.isSnapshot());
+		assertNull(context.parent());
 		assertNull(context.parent());
 		assertThrows(UnsupportedOperationException.class, () -> saved.getTags().clear());
 	}
@@ -119,7 +122,7 @@ class VaultContextTests {
 	void defaultMustBeFullAndNamesCannotEscapeTheArtifactDirectory() throws Exception {
 		var f = fixture();
 		assertThrows(IllegalArgumentException.class, () -> f.vault.saveContext(ARTIFACT, "blobs",
-			VaultContext.modification(null, builder().build(), Set.of(), Set.of()), true));
+			VaultContext.modification("absent", builder().build(), Set.of(), Set.of()), true));
 		for (String name : Set.of("../escape", "a/b", "a\\b", "C:escape", ".", "..", " ")) {
 			assertThrows(IllegalArgumentException.class, () -> f.vault.getChrysalisFile(ARTIFACT, name));
 			assertThrows(IllegalArgumentException.class, () -> VaultContext.modification(name, builder().build(), Set.of(), Set.of()));
@@ -130,9 +133,9 @@ class VaultContextTests {
 	void legacyFullSchemasLoadAndUnknownTagsArePreserved() throws Exception {
 		var f = fixture();
 		assertTrue(f.vault.chrysalisize(ARTIFACT).getTags().isEmpty());
-		var legacy = Weaver.GSON.toJsonTree(f.base.getChrysalis()).getAsJsonObject();
+		var legacy = new com.google.gson.JsonObject();
 		legacy.addProperty("schema", 1);
-		legacy.remove("algorithm");
+		legacy.add("blobs", Weaver.GSON.toJsonTree(f.base.getChrysalis()).getAsJsonObject().get("blobs"));
 		Files.writeString(f.vault.getChrysalisFile(ARTIFACT, "legacy-one"), legacy.toString());
 		assertEquals(f.base.getChrysalis(), f.vault.chrysalisize(ARTIFACT, "legacy-one").getChrysalis());
 		Files.writeString(f.vault.getChrysalisFile(ARTIFACT, "legacy-zero"), legacy.get("blobs").toString());
@@ -172,19 +175,23 @@ class VaultContextTests {
 	private ChrysalisModification.Builder builder() { return ChrysalisModification.builder("SHA-1"); }
 
 	@Test
-	void contextSchemaIsSeparateFromItsContentSchemaAndLegacyFilesUpgrade() {
+	void oneSchemaCoversTheWholeDeclarationAndLegacyFilesUpgrade() {
 		VaultContext context = VaultContext.modification("blobs", builder().build(), Set.of("strict"), Set.of());
 		var json = Weaver.GSON.toJsonTree(context).getAsJsonObject();
-		assertEquals(1, json.get("schema").getAsInt());
-		assertEquals(2, json.getAsJsonObject("content").get("schema").getAsInt());
+		assertEquals(4, json.get("schema").getAsInt());
+		assertFalse(json.has("content"));
+		assertTrue(json.has("algorithm"));
 		var parsed = Weaver.GSON.fromJson(json, VaultContext.class);
 		assertEquals(context.parent(), parsed.parent());
 		assertEquals(context.tags(), parsed.tags());
 		String legacy = "{\"type\":\"modification\",\"parent\":\"blobs\",\"tags\":[\"strict\"],"
 			+ "\"schema\":2,\"algorithm\":\"SHA-1\",\"changes\":{}}";
 		var upgraded = Weaver.GSON.toJsonTree(Weaver.GSON.fromJson(legacy, VaultContext.class)).getAsJsonObject();
-		assertEquals(1, upgraded.get("schema").getAsInt());
-		assertEquals(2, upgraded.getAsJsonObject("content").get("schema").getAsInt());
+		assertEquals(4, upgraded.get("schema").getAsInt());
+		assertFalse(upgraded.has("content"));
+		assertTrue(upgraded.has("blobs"));
+		assertTrue(upgraded.has("replacements"));
+		assertTrue(upgraded.has("removals"));
 	}
 
 	@Test

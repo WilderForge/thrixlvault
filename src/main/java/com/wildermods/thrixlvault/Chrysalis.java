@@ -215,8 +215,8 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 		try (var reader = Files.newBufferedReader(path)) {
 			VaultContext context = Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class),
 				"Snapshot file contains null");
-			return context.snapshot().orElseThrow(() -> new IOException(
-				"A modification must be resolved through its Vault: " + path));
+			if (context.parent() != null) throw new IOException("A parent must be resolved through its Vault: " + path);
+			return context.rootSnapshot();
 		}
 	}
 	

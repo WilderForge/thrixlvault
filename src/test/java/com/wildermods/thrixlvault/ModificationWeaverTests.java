@@ -38,9 +38,11 @@ class ModificationWeaverTests {
 		modded.verifyBlobs();
 		modded.verifyDirectory(desired);
 		var json = Weaver.GSON.fromJson(Files.readString(modded.getChrysalisFile()), com.google.gson.JsonObject.class);
-		assertEquals("modification", json.get("type").getAsString());
-		assertFalse(json.getAsJsonObject("content").has("blobs"));
-		assertEquals(2002, json.getAsJsonObject("content").getAsJsonObject("changes").size());
+		assertFalse(json.has("type"));
+		assertTrue(json.getAsJsonObject("blobs").size() == 1);
+		assertFalse(json.has("content"));
+		assertEquals(1, json.getAsJsonObject("replacements").size());
+		assertEquals(1, json.getAsJsonArray("removals").size());
 		try (var entries = Files.list(modded.getChrysalisFile().getParent())) { assertEquals(2, entries.count()); }
 		try (var blobs = Files.list(vault.blobDir)) { assertEquals(2, blobs.count()); }
 	}

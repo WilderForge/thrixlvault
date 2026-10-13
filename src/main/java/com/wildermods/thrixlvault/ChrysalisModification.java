@@ -41,11 +41,12 @@ public final class ChrysalisModification {
 	public enum Operation { ADD, REPLACE, REMOVE }
 
 	/**
-	 * A change to one path. {@code expected} is null only for additions;
+	 * A change to one path. {@code expected} is optional for replacements/removals
+	 * and absent for additions;
 	 * {@code replacement} is null only for removals.
 	 *
 	 * @param operation the kind of change
-	 * @param expected the required previous hash, or null for an addition
+	 * @param expected an optional required previous hash; null retains only the operation's path precondition
 	 * @param replacement the resulting hash, or null for a removal
 	 */
 	public record Change(Operation operation, Hash expected, Hash replacement) {
@@ -59,11 +60,9 @@ public final class ChrysalisModification {
 					Objects.requireNonNull(replacement, "replacement");
 				}
 				case REPLACE -> {
-					Objects.requireNonNull(expected, "expected");
 					Objects.requireNonNull(replacement, "replacement");
 				}
 				case REMOVE -> {
-					Objects.requireNonNull(expected, "expected");
 					if (replacement != null) {
 						throw new IllegalArgumentException("A removal cannot have a replacement hash");
 					}
@@ -187,9 +186,9 @@ public final class ChrysalisModification {
 				if (actual != null) {
 					throw new IllegalArgumentException("Cannot add existing path: " + path);
 				}
-			} else if (actual == null || !change.expected().hashEquals(actual)) {
+			} else if (actual == null || (change.expected() != null && !change.expected().hashEquals(actual))) {
 				throw new IllegalArgumentException("Hash precondition failed for " + path
-					+ ": expected " + change.expected().hash() + ", got "
+					+ ": expected " + (change.expected() == null ? "an existing file" : change.expected().hash()) + ", got "
 					+ (actual == null ? "absent" : actual.hash()));
 			}
 			if (change.operation() == Operation.REMOVE) {
@@ -341,12 +340,22 @@ public final class ChrysalisModification {
 
 		/** Replaces the expectation at a path with the specified original hash. */
 		public Builder replace(Path path, Hash expected, Hash replacement) {
-			return put(path, new Change(Operation.REPLACE, expected, replacement));
+			return put(path, new Change(Operation.REPLACE, Objects.requireNonNull(expected, "expected"), replacement));
+		}
+
+		/** Replaces an existing path without requiring a particular previous hash. */
+		public Builder replace(Path path, Hash replacement) {
+			return put(path, new Change(Operation.REPLACE, null, replacement));
 		}
 
 		/** Removes the expectation at a path with the specified original hash. */
 		public Builder remove(Path path, Hash expected) {
-			return put(path, new Change(Operation.REMOVE, expected, null));
+			return put(path, new Change(Operation.REMOVE, Objects.requireNonNull(expected, "expected"), null));
+		}
+
+		/** Removes an existing path without requiring a particular previous hash. */
+		public Builder remove(Path path) {
+			return put(path, new Change(Operation.REMOVE, null, null));
 		}
 
 		/** Hides a path and all descendants without discarding stored expectations. */

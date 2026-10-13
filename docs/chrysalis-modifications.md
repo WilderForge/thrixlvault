@@ -19,8 +19,11 @@ ChrysalisizedVault modded = vault.chrysalisize(manifest, "modded");
 modded.export(freshDestination, true);
 ```
 
-Hashes must use the base snapshot's algorithm. Additions require absent paths;
-replacements and removals require the specified original hash. Each modification
+Hashes must use the base snapshot's algorithm. Blobs added to a child require
+absent paths; replacements and removals require existing paths. The overloads
+accepting an expected hash also verify that hash before applying or saving.
+The grouped JSON stores no expected old hashes, so deserialized replacements
+and removals check path existence rather than a particular previous hash. Each modification
 has one operation per normalized path, but any number of operations can share
 the same hash at different paths. To change a path multiple times, supply
 multiple modifications to `withModifications` in order. A subsequent change
@@ -32,13 +35,23 @@ Conflicting changes throw `IllegalArgumentException`. Paths must be relative,
 remain within the artifact, and describe files rather than a file and its child.
 JSON paths use `/` on every platform.
 
-The Gson adapter is registered with `Weaver.GSON`. The separate modification
-schema is version 2, with `schema`, `algorithm`, `changes`, `ignore`, and
-`removeIgnore` fields. Version 1 modifications remain readable. A file change
-has `operation` (`add`, `replace`, or `remove`), an `expected` hash for replace
-and remove, and a `replacement` hash for add and replace. Duplicate paths,
-duplicate properties, unknown fields, invalid operations, and unsupported
-schemas are rejected. JSON object property order does not matter.
+The Gson adapters registered with `Weaver.GSON` write one common file schema,
+version 4, for snapshots, modifications and named vault declarations. This
+unreleased schema is being adjusted in place on `develop`; changing its layout
+does not increment its version.
+
+The file data consists of:
+
+- `blobs`: sorted hash keys mapped to sorted path arrays, added to inherited state
+  or empty state when there is no parent; there is no separate `additions` field.
+- `replacements`: sorted new hash keys mapped to sorted existing-path arrays.
+- `removals`: a sorted array of paths to remove from the inherited expectations.
+
+One hash can appear at any number of paths, including across `blobs` and
+`replacements`. There is no path-keyed `changes` object or per-file operation
+wrapper in the current schema. Duplicate/conflicting paths, duplicate properties,
+unknown fields and unsupported schemas are rejected. Property order is irrelevant
+to readers. The historical compatibility readers remain available.
 
 ## Ignores
 
@@ -79,10 +92,10 @@ unexpected files too. Ignores do not delete files or discard expectations, so
 removing an ignore restores checking against the retained (possibly modified)
 hash. `between` includes changes to both file expectations and explicit roots.
 
-The modification JSON uses arrays such as `"ignore": ["cache"]` and
-`"removeIgnore": ["cache"]`. Resolved snapshots with ignores use Chrysalis
-schema 3 (`ignoredPaths`); snapshots without ignores retain schema 2 output.
-Older full manifest schemas remain readable. Cloning and serialization preserve
+The common JSON uses `"ignore": ["cache"]` to add ignore roots and
+`"removeIgnore": ["cache"]` to remove inherited roots. Both apply to the
+inherited state, or an empty state at a root. Older schema 3
+snapshots using `ignoredPaths` remain readable. Cloning and serialization preserve
 ignore state, including unknown paths and nested roots.
 
 ## Cached active expectations
@@ -141,20 +154,21 @@ other named declarations sharing one vault blob store. `chrysalisize(artifact)`
 loads `blobs`; `chrysalisize(artifact, name)` loads and resolves that context.
 `blobs` is reserved for a full snapshot. Names have no file extension or path
 components. Existing untyped full manifests (schemas 0 through 3) remain readable;
-Weaver writes both snapshots and modifications using the versioned context
-envelope, preserving local tags and ignore roots.
+Weaver writes both snapshots and modifications using the common schema 4 file
+format, preserving local tags and ignore roots.
 
-An internal declaration contains either a snapshot or a modification plus local metadata.
-The public loading result is always `ChrysalisizedVault`, which binds the resolved
-`Chrysalis`, tags, ancestry, artifact, and owning `Vault`.
-New context JSON explicitly identifies `type` as `snapshot` or `modification`.
-The context envelope has its own `schema: 1`; its `content` object retains the
-snapshot or modification's separate schema. Unsupported context versions are
-rejected. Previous flat typed contexts remain readable and are upgraded to the
-versioned envelope when saved. The Gson adapter is registered with
-`Weaver.GSON`. The old `Chrysalis.fromFile` and
-`ChrysalisModification.fromFile` helpers are deprecated; use `vault.load(artifact, file)`
-for either kind of JSON without knowing its type in advance.
+Every declaration contains one set of file, ignore and tag operations plus an
+optional parent. The public loading result is always `ChrysalisizedVault`, which
+binds the resolved `Chrysalis`, tags, ancestry, artifact and owning `Vault`.
+
+There is no `type` discriminator or internal snapshot/modification union. A missing
+or null parent makes the declaration a root; otherwise it inherits from that
+parent. Both use exactly the same top-level fields and a single `schema: 4`, with
+no `content` wrapper or nested schema. Schema 4 remains unchanged while this
+unreleased development format is adjusted. Historical readers remain available;
+all public writers use the current untyped layout. The old `Chrysalis.fromFile`
+and `ChrysalisModification.fromFile` helpers are deprecated; use
+`vault.load(artifact, file)` to resolve the declaration with its owning vault.
 
 ```java
 vault.saveModification(artifact, "modded", "blobs", classpathFix,
@@ -172,20 +186,48 @@ The resulting `strict.json` declaration has this shape:
 
 ```json
 {
-  "schema": 1,
-  "type": "modification",
+  "schema": 4,
   "parent": "modded",
+  "algorithm": "SHA-1",
+  "blobs": {},
+  "replacements": {},
+  "removals": [],
+  "ignore": [],
+  "removeIgnore": [],
   "tags": ["strict"],
-  "removeTags": ["allow-extra-files"],
-  "content": {
-    "schema": 2,
-    "algorithm": "SHA-1",
-    "changes": {},
-    "ignore": [],
-    "removeIgnore": []
-  }
+  "removeTags": ["allow-extra-files"]
 }
 ```
+
+`blobs.json` has those same fields and schema. Its parent is null. `blobs` always
+adds hash-to-path expectations to inherited state, or to empty state at a root.
+Applying those additions to empty state produces a full snapshot; there is no
+separate snapshot operation or file type. `replacements` updates existing paths,
+and `removals` removes existing paths.
+
+Replacement, removal and `removeIgnore` operations at a root naturally fail
+through ordinary application rules because there are no inherited targets.
+Removing an absent tag is harmless, including at a root, and the local tag removal
+is retained in the declaration. Writers emit null parents explicitly; readers
+also accept an omitted parent.
+
+For example, the file fields in a child can be:
+
+```json
+{
+  "blobs": {
+    "NEW_CONTENT_HASH": ["added/path1", "added/path2"]
+  },
+  "replacements": {
+    "REPLACEMENT_HASH": ["scratchpad.jar", "wildermyth.jar"]
+  },
+  "removals": ["obsolete/path3", "obsolete/path4"]
+}
+```
+
+`removals` is an array because JSON has no set literal. Hash keys and the path
+arrays under both `blobs` and `replacements` are sorted lexically. Removal,
+ignore and tag arrays are also sorted.
 
 A missing or null `parent` starts with empty expectations, ignores, and tags,
 using the modification's declared hash algorithm. It never implicitly uses
@@ -294,9 +336,9 @@ many paths are diffed automatically. Files under ignored roots are also hashed
 and stored, allowing a later `removeIgnore` to restore their expectations.
 Explicit ignore operations are preserved even when an addition is redundant.
 
-Ignore removals require an exact inherited root. A parentless snapshot therefore
-cannot remove an ignore. Removing an absent tag is harmless; tag removals without
-a parent have no effect and are omitted from the snapshot declaration. Adding
+Ignore removals require an exact inherited root, so `removeIgnore` without a
+parent fails the same existence check. Removing an absent tag is harmless; tag
+removals without a parent have no effect but are retained in the declaration. Adding
 and removing the same ignore root or tag in one layer is rejected. Metadata and
 ancestry are validated before storing bytes.
 
@@ -310,7 +352,7 @@ Output declarations are not replaced by default. `force(true)` permits replacing
 the selected declaration. For standalone snapshots, force also repairs stored
 blobs, preserving the behavior of the existing force constructors. For child
 modifications, force verifies and reuses shared blobs without overwriting them.
-Both outputs use the versioned context JSON envelope; older formats remain readable.
+Both outputs use the same schema 4 structure; older formats remain readable.
 
 Configuration becomes immutable when `weave()` first starts. Mutators and a second
 concurrent weave are rejected. If weaving fails, the same instance may retry with
@@ -321,3 +363,12 @@ second successful weave is rejected as before.
 Verification and ingestion use MassHash 2.1.5.1 directly with the declared
 algorithm. MassHash supplies fresh digests for concurrent calls and closes hashing
 streams, including when digest creation fails.
+
+## Historical inputs
+
+Original snapshot schemas 0–3, standalone patch schemas 1–2, flat contexts and
+the old schema-1 envelope remain compatibility inputs. Public writers always
+emit the current grouped schema 4 layout. The prior experimental schema-4 `changes` and `type` layouts are not retained
+as another version or migration format; recreate temporary development output
+using the current writer. Reading a historical
+file does not rewrite it automatically.

@@ -202,19 +202,15 @@ public class Vault {
 		for (int index = 0; index < layers.size(); index++) {
 			ContextLayer layer = layers.get(index);
 			VaultContext declaration = layer.declaration();
-			if (declaration.isSnapshot()) {
-				result = declaration.snapshot().orElseThrow();
-			} else {
-				ChrysalisModification modification = declaration.modification().orElseThrow();
-				if (result == null) {
-					try {
-						result = Chrysalis.EMPTY.clone().factory(new BlobFactory(modification.algorithm()));
-					} catch (java.security.NoSuchAlgorithmException e) {
-						throw new IOException(e);
-					}
+			ChrysalisModification modification = declaration.modification();
+			if (result == null) {
+				try {
+					result = Chrysalis.EMPTY.clone().factory(new BlobFactory(modification.algorithm()));
+				} catch (java.security.NoSuchAlgorithmException e) {
+					throw new IOException(e);
 				}
-				result = modification.applyTo(result);
 			}
+			result = modification.applyTo(result);
 			tags.removeAll(declaration.removeTags());
 			tags.addAll(declaration.tags());
 			Path file = index == layers.size() - 1 ? source : directory.resolve(layer.name() + ".json");
@@ -227,8 +223,8 @@ public class Vault {
 	private record ContextLayer(String name, VaultContext declaration) {}
 
 	private static void checkDefault(String name, VaultContext context) {
-		if (name.equals("blobs") && !context.isSnapshot()) {
-			throw new IllegalArgumentException("The default 'blobs' context must be a full snapshot");
+		if (name.equals("blobs") && context.parent() != null) {
+			throw new IllegalArgumentException("The default 'blobs' context must be parentless");
 		}
 	}
 

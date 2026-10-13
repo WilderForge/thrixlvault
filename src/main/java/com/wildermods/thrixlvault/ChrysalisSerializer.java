@@ -24,45 +24,25 @@ import com.wildermods.masshash.utils.ByteUtil;
 
 public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 	
-	private static final int SCHEMA = 3;
+	private static final int LEGACY_SCHEMA = 3;
 	
 	@Override
 	public void write(JsonWriter out, Chrysalis value) throws IOException {
-		out.beginObject();
-		{
-			out.name("schema");
-			out.value(value.getIgnoredPaths().isEmpty() ? 2 : SCHEMA);
-			
-			out.name("algorithm");
-			out.value(value.getBlobFactory().algorithm());
-			
-			out.name("blobs");
-			out.beginObject();
-			{
-				for(Hash hash : value.blobs().keySet()) {
-					out.name(hash.hash());
-					out.beginArray();
-					for(Path path : value.blobs().get(hash)) {
-						out.value(path.toString());
-					}
-					out.endArray();
-				}
-			}
-			out.endObject();
-			if (!value.getIgnoredPaths().isEmpty()) {
-				out.name("ignoredPaths").beginArray();
-				for (Path path : value.getIgnoredPaths().stream().sorted().toList()) {
-					out.value(path.toString().replace(path.getFileSystem().getSeparator(), "/"));
-				}
-				out.endArray();
-			}
-		}
-		out.endObject();
+		new VaultContextSerializer().write(out, VaultContext.snapshot(value, Set.of()));
 	}
-	
+
 	@Override
 	@SuppressWarnings("deprecation")
 	public Chrysalis read(JsonReader in) throws IOException {
+		try {
+			return new VaultContextSerializer().read(in).rootSnapshot();
+		} catch (IllegalStateException | IllegalArgumentException e) {
+			throw new JsonParseException("Expected a valid parentless declaration; resolve children through their Vault", e);
+		}
+	}
+
+	@SuppressWarnings("deprecation")
+	Chrysalis readPayload(JsonReader in) throws IOException {
 		Chrysalis ret = new Chrysalis();
 		
 		in.beginObject();
@@ -79,7 +59,7 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 		}
 		
 		String algorithm;
-		if (schema < 1 || schema > SCHEMA) {
+		if (schema < 1 || schema > LEGACY_SCHEMA) {
 			throw new JsonParseException("Unsupported Chrysalis schema: " + schema);
 		}
 		if(schema == 1) {
@@ -251,7 +231,7 @@ public class ChrysalisSerializer extends TypeAdapter<Chrysalis>{
 		if(schemaElement != null) {
 			schema = schemaElement.getAsInt();
 		}
-		if(schema > SCHEMA) {
+		if(schema > LEGACY_SCHEMA) {
 			throw new UnsupportedOperationException("Future schema version detected. Schema " + schema + " found, but we are on " + SCHEMA);
 		}
 		

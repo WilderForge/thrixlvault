@@ -1,11 +1,18 @@
 package com.wildermods.thrixlvault;
 
 import java.io.IOException;
-import java.io.StringReader;
 import java.util.HashSet;
+import java.nio.file.Path;
+import java.security.NoSuchAlgorithmException;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import com.wildermods.masshash.BlobFactory;
+import com.wildermods.masshash.Hash;
 import java.util.Set;
 
 import com.google.gson.JsonElement;
+import com.google.gson.internal.bind.JsonTreeReader;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
@@ -13,28 +20,68 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 
-/** Reads typed declarations and legacy untyped Chrysalis manifests. */
+/** One file schema for snapshots and modifications, with readers for historical formats. */
 final class VaultContextSerializer extends TypeAdapter<VaultContext> {
-	private static final int SCHEMA = 1;
+	static final int SCHEMA = 4;
 
 	@Override
 	public void write(JsonWriter out, VaultContext value) throws IOException {
-		JsonObject payload = value.isSnapshot()
-			? Weaver.GSON.toJsonTree(value.snapshot().orElseThrow(), Chrysalis.class).getAsJsonObject()
-			: Weaver.GSON.toJsonTree(value.modification().orElseThrow(), ChrysalisModification.class).getAsJsonObject();
+		Map<String, Set<String>> blobs = new TreeMap<>();
+		Map<String, Set<String>> replacements = new TreeMap<>();
+		Set<Path> removals = new TreeSet<>();
+		ChrysalisModification modification = value.modification();
+		String algorithm = modification.algorithm();
+		Set<Path> ignores = modification.ignoredPaths();
+		Set<Path> removeIgnores = modification.removedIgnores();
+		modification.changes().forEach((path, change) -> {
+			switch (change.operation()) {
+				case ADD -> group(blobs, change.replacement(), path);
+				case REPLACE -> group(replacements, change.replacement(), path);
+				case REMOVE -> removals.add(path);
+			}
+		});
 		out.beginObject();
 		out.name("schema").value(SCHEMA);
-		out.name("type").value(value.isSnapshot() ? "snapshot" : "modification");
-		if (!value.isSnapshot() && value.parent() != null) {
+		boolean serializeNulls = out.getSerializeNulls();
+		try {
+			out.setSerializeNulls(true);
 			out.name("parent").value(value.parent());
+		} finally {
+			out.setSerializeNulls(serializeNulls);
 		}
+		out.name("algorithm").value(algorithm);
+		writeGroups(out, "blobs", blobs);
+		writeGroups(out, "replacements", replacements);
+		writePaths(out, "removals", removals);
+		writePaths(out, "ignore", ignores);
+		writePaths(out, "removeIgnore", removeIgnores);
 		writeTags(out, "tags", value.tags());
-		if (!value.isSnapshot()) {
-			writeTags(out, "removeTags", value.removeTags());
-		}
-		out.name("content");
-		Weaver.GSON.toJson(payload, out);
+		writeTags(out, "removeTags", value.removeTags());
 		out.endObject();
+	}
+
+	private static void group(Map<String, Set<String>> groups, Hash hash, Path path) {
+		groups.computeIfAbsent(hash.hash(), key -> new TreeSet<>()).add(jsonPath(path));
+	}
+
+	private static String jsonPath(Path path) {
+		return path.toString().replace(path.getFileSystem().getSeparator(), "/");
+	}
+
+	private static void writeGroups(JsonWriter out, String field, Map<String, Set<String>> groups) throws IOException {
+		out.name(field).beginObject();
+		for (var entry : groups.entrySet()) {
+			out.name(entry.getKey()).beginArray();
+			for (String path : entry.getValue()) out.value(path);
+			out.endArray();
+		}
+		out.endObject();
+	}
+
+	private static void writePaths(JsonWriter out, String field, Set<Path> paths) throws IOException {
+		out.name(field).beginArray();
+		for (String path : paths.stream().map(VaultContextSerializer::jsonPath).sorted().toList()) out.value(path);
+		out.endArray();
 	}
 
 	@Override
@@ -50,25 +97,20 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 		}
 		in.endObject();
 		try {
+			Integer version = data.has("schema") ? schemaVersion(data.get("schema")) : null;
+			if (version != null && version >= SCHEMA) {
+				if (version != SCHEMA) throw new JsonParseException("Unsupported vault schema: " + version);
+				return readUnified(data);
+			}
 			String type = optionalString(data.remove("type"));
 			String parent = optionalString(data.remove("parent"));
 			Set<String> tags = readTags(data.remove("tags"));
 			Set<String> removeTags = readTags(data.remove("removeTags"));
 			if (data.has("content")) {
-				JsonElement schema = data.remove("schema");
-				if (schema == null || !schema.isJsonPrimitive()
-					|| !schema.getAsJsonPrimitive().isNumber()) {
-					throw new JsonParseException("Vault context requires a numeric schema");
+				if (version == null || version != 1) {
+					throw new JsonParseException("Unsupported legacy envelope schema: " + version);
 				}
-				int version;
-				try {
-					version = schema.getAsBigDecimal().intValueExact();
-				} catch (ArithmeticException | NumberFormatException e) {
-					throw new JsonParseException("Invalid context schema: " + schema, e);
-				}
-				if (version != SCHEMA) {
-					throw new JsonParseException("Unsupported context schema: " + version);
-				}
+				data.remove("schema");
 				if (type == null) {
 					throw new JsonParseException("Versioned context requires an explicit type");
 				}
@@ -88,7 +130,7 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 			}
 			if (type.equals("modification")) {
 				return VaultContext.modification(parent,
-					Weaver.GSON.fromJson(data, ChrysalisModification.class), tags, removeTags);
+					new ChrysalisModificationSerializer().readPayload(new JsonTreeReader(data)), tags, removeTags);
 			}
 			if (!type.equals("snapshot")) {
 				throw new JsonParseException("Unknown context type: " + type);
@@ -105,11 +147,78 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 				throw new JsonParseException("Unknown snapshot fields: " + data.keySet());
 			}
 			for (var field : data.entrySet()) { ordered.add(field.getKey(), field.getValue()); }
-			try (JsonReader reader = new JsonReader(new StringReader(ordered.toString()))) {
-				return VaultContext.snapshot(new ChrysalisSerializer().read(reader), tags);
+			try (JsonReader reader = new JsonTreeReader(ordered)) {
+				return VaultContext.snapshot(new ChrysalisSerializer().readPayload(reader), tags);
 			}
 		} catch (IllegalArgumentException | IllegalStateException | NullPointerException e) {
 			throw new JsonParseException("Invalid vault context: " + e.getMessage(), e);
+		}
+	}
+
+	private VaultContext readUnified(JsonObject data) throws IOException {
+		data.remove("schema");
+		String parent = optionalString(data.remove("parent"));
+		String algorithm = optionalString(data.remove("algorithm"));
+		Set<String> tags = readTags(data.remove("tags"));
+		Set<String> removeTags = readTags(data.remove("removeTags"));
+		JsonElement blobs = data.remove("blobs");
+		JsonElement replacements = data.remove("replacements");
+		JsonElement removals = data.remove("removals");
+		Set<Path> ignores = readPaths(data.remove("ignore"));
+		Set<Path> removedIgnores = readPaths(data.remove("removeIgnore"));
+		if (algorithm == null || blobs == null || !blobs.isJsonObject()
+			|| replacements == null || !replacements.isJsonObject() || removals == null || !removals.isJsonArray()) {
+			throw new JsonParseException("Schema 4 requires algorithm, blobs, replacements and removals");
+		}
+		if (!data.isEmpty()) throw new JsonParseException("Unknown vault fields: " + data.keySet());
+		BlobFactory factory;
+		try {
+			factory = new BlobFactory(algorithm);
+		} catch (NoSuchAlgorithmException e) {
+			throw new JsonParseException("Unsupported algorithm: " + algorithm, e);
+		}
+		var builder = ChrysalisModification.builder(algorithm);
+		readGroups(blobs.getAsJsonObject(), factory).forEach(builder::add);
+		readGroups(replacements.getAsJsonObject(), factory).forEach(builder::replace);
+		readPaths(removals).forEach(builder::remove);
+		ignores.forEach(builder::ignore);
+		removedIgnores.forEach(builder::removeIgnore);
+		ChrysalisModification modification = builder.build();
+		return VaultContext.modification(parent, modification, tags, removeTags);
+	}
+
+	private static Map<Path, Hash> readGroups(JsonObject groups, BlobFactory factory) {
+		Map<Path, Hash> files = new TreeMap<>();
+		for (var entry : groups.entrySet()) {
+			Hash hash = Hash.of(factory.digest, entry.getKey());
+			for (Path path : readPaths(entry.getValue())) {
+				if (files.putIfAbsent(path, hash) != null) throw new JsonParseException("Multiple hashes for path: " + path);
+			}
+		}
+		return files;
+	}
+
+	private static Set<Path> readPaths(JsonElement element) {
+		if (element == null) return Set.of();
+		if (!element.isJsonArray()) throw new JsonParseException("Paths must be arrays");
+		Set<Path> paths = new TreeSet<>();
+		for (JsonElement entry : element.getAsJsonArray()) {
+			String text = optionalString(entry);
+			if (text == null || text.contains("\\")) throw new JsonParseException("Expected a relative path using '/'");
+			Path path = ChrysalisModification.normalizePath(Path.of(text));
+			if (!paths.add(path)) throw new JsonParseException("Duplicate path: " + path);
+		}
+		return paths;
+	}
+
+	private static int schemaVersion(JsonElement schema) {
+		if (schema == null || !schema.isJsonPrimitive() || !schema.getAsJsonPrimitive().isNumber()) {
+			throw new JsonParseException("Vault requires a numeric schema");
+		}
+		try {
+			return schema.getAsBigDecimal().intValueExact();
+		} catch (ArithmeticException | NumberFormatException e) {
+			throw new JsonParseException("Invalid vault schema: " + schema, e);
 		}
 	}
 

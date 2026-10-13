@@ -77,7 +77,7 @@ class ChrysalisNavigationTests {
 		assertEquals(Set.of("strict", "vendor:custom"), saved.getLocalTags());
 		assertEquals(Set.of("inherited"), saved.getRemovedTags());
 		assertEquals("blobs", saved.getParent().orElseThrow().getContextName());
-		assertEquals("modification", Weaver.GSON.fromJson(Files.readString(saved.getChrysalisFile()), com.google.gson.JsonObject.class).get("type").getAsString());
+		assertFalse(Weaver.GSON.fromJson(Files.readString(saved.getChrysalisFile()), com.google.gson.JsonObject.class).has("type"));
 		assertEquals(saved.getChrysalis(), vault.load(ARTIFACT, saved.getChrysalisFile()).getChrysalis());
 		assertEquals("modded", vault.chrysalisize(ARTIFACT).getChild("modded").getContextName());
 	}

@@ -18,39 +18,22 @@ import com.wildermods.masshash.Hash;
 import com.wildermods.thrixlvault.ChrysalisModification.Change;
 import com.wildermods.thrixlvault.ChrysalisModification.Operation;
 
-/** Serializes path-specific modifications independently of full Chrysalis manifests. */
+/** Uses the common vault schema, with compatibility readers for old standalone patches. */
 public final class ChrysalisModificationSerializer extends TypeAdapter<ChrysalisModification> {
 
-	private static final int SCHEMA = 2;
+	private static final int LEGACY_SCHEMA = 2;
 
 	@Override
 	public void write(JsonWriter out, ChrysalisModification value) throws IOException {
-		out.beginObject();
-		out.name("schema").value(SCHEMA);
-		out.name("algorithm").value(value.algorithm());
-		out.name("changes").beginObject();
-		for (Map.Entry<Path, Change> entry : value.changes().entrySet()) {
-			Path path = entry.getKey();
-			out.name(path.toString().replace(path.getFileSystem().getSeparator(), "/"));
-			out.beginObject();
-			Change change = entry.getValue();
-			out.name("operation").value(change.operation().name().toLowerCase(Locale.ROOT));
-			if (change.expected() != null) {
-				out.name("expected").value(change.expected().hash());
-			}
-			if (change.replacement() != null) {
-				out.name("replacement").value(change.replacement().hash());
-			}
-			out.endObject();
-		}
-		out.endObject();
-		writePaths(out, "ignore", value.ignoredPaths());
-		writePaths(out, "removeIgnore", value.removedIgnores());
-		out.endObject();
+		new VaultContextSerializer().write(out, VaultContext.modification(null, value, Set.of(), Set.of()));
 	}
 
 	@Override
 	public ChrysalisModification read(JsonReader in) throws IOException {
+		return new VaultContextSerializer().read(in).modification();
+	}
+
+	ChrysalisModification readPayload(JsonReader in) throws IOException {
 		Integer schema = null;
 		String algorithm = null;
 		Map<Path, RawChange> raw = null;
@@ -71,7 +54,7 @@ public final class ChrysalisModificationSerializer extends TypeAdapter<Chrysalis
 			}
 		}
 		in.endObject();
-		if (schema == null || schema < 1 || schema > SCHEMA) {
+		if (schema == null || schema < 1 || schema > LEGACY_SCHEMA) {
 			throw new JsonParseException("Unsupported modification schema: " + schema);
 		}
 		if (schema == 1 && (fields.contains("ignore") || fields.contains("removeIgnore"))) {
@@ -85,6 +68,9 @@ public final class ChrysalisModificationSerializer extends TypeAdapter<Chrysalis
 			Map<Path, Change> changes = new HashMap<>();
 			for (Map.Entry<Path, RawChange> entry : raw.entrySet()) {
 				RawChange change = entry.getValue();
+				if (change.operation() != Operation.ADD && change.expected() == null) {
+					throw new JsonParseException("Legacy replacement/removal requires an expected hash");
+				}
 				changes.put(entry.getKey(), new Change(change.operation(),
 					toHash(factory, change.expected()), toHash(factory, change.replacement())));
 			}
@@ -143,14 +129,6 @@ public final class ChrysalisModificationSerializer extends TypeAdapter<Chrysalis
 
 	private static Hash toHash(BlobFactory factory, String hash) {
 		return hash == null ? null : Hash.of(factory.digest, hash);
-	}
-
-	private static void writePaths(JsonWriter out, String name, Set<Path> paths) throws IOException {
-		out.name(name).beginArray();
-		for (Path path : paths) {
-			out.value(path.toString().replace(path.getFileSystem().getSeparator(), "/"));
-		}
-		out.endArray();
 	}
 
 	private static Set<Path> readPaths(JsonReader in) throws IOException {

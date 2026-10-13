@@ -53,7 +53,7 @@ class FluentWeaverTests {
 		Files.delete(source.resolve("cache/data"));
 		var standalone = new Weaver(vault, ARTIFACT, source, "standalone")
 			.parent("blobs").parent(null).tag("local").removeTag("absent").weave();
-		assertTrue(standalone.getContext().orElseThrow().isSnapshot());
+		assertNull(standalone.getContext().orElseThrow().parent());
 		assertTrue(standalone.getParent().isEmpty());
 		assertEquals(Set.of("local"), standalone.getTags());
 		assertTrue(standalone.getChrysalis().getIgnoredPaths().isEmpty());

@@ -51,8 +51,6 @@ import com.wildermods.thrixlvault.steam.IVaultable;
  * <p>
  * This class is designed to ensure blob integrity and can validate that all blobs referenced
  * in a manifest exist and are unmodified.
- * 
- * Weaver is not thread-safe for configuration or invocation.
  */
 public class Weaver implements IWeaver {
 	
@@ -75,7 +73,7 @@ public class Weaver implements IWeaver {
 	
 	protected static final Logger LOGGER = LogManager.getLogger();
 	
-	protected ChrysalisizedVault vault;
+	protected volatile ChrysalisizedVault vault;
 	protected final IVaultable artifact;
 	protected final Marker marker;
 	
@@ -144,14 +142,14 @@ public class Weaver implements IWeaver {
 	}
 	
 	/** Selects the output declaration name; defaults to {@code blobs}. */
-	public Weaver name(String name) {
+	public synchronized Weaver name(String name) {
 		ensureConfigurable();
 		this.contextName = Vault.requireContextName(name);
 		return this;
 	}
 
 	/** Selects a parent in the same artifact directory; null produces a full snapshot. */
-	public Weaver parent(String name) {
+	public synchronized Weaver parent(String name) {
 		ensureConfigurable();
 		this.parentName = name == null ? null : Vault.requireContextName(name);
 		return this;
@@ -162,35 +160,35 @@ public class Weaver implements IWeaver {
 	 * repairs stored blobs, matching the existing force constructors. Child weaving
 	 * verifies and reuses shared blobs without overwriting them.
 	 */
-	public Weaver force(boolean force) {
+	public synchronized Weaver force(boolean force) {
 		ensureConfigurable();
 		this.force = force;
 		return this;
 	}
 
 	/** Adds explicit ignore roots. Their bytes are still stored for later restoration. */
-	public Weaver ignore(Path... paths) {
+	public synchronized Weaver ignore(Path... paths) {
 		ensureConfigurable();
 		ignores.addAll(normalizePaths(paths));
 		return this;
 	}
 
 	/** Removes exact inherited ignore roots; roots must exist in the parent. */
-	public Weaver removeIgnore(Path... paths) {
+	public synchronized Weaver removeIgnore(Path... paths) {
 		ensureConfigurable();
 		removeIgnores.addAll(normalizePaths(paths));
 		return this;
 	}
 
 	/** Adds local tags; unknown tags are preserved. */
-	public Weaver tag(String... tags) {
+	public synchronized Weaver tag(String... tags) {
 		ensureConfigurable();
 		this.tags.addAll(validateTags(tags));
 		return this;
 	}
 
 	/** Subtracts inherited tags; removing an absent tag is harmless. */
-	public Weaver removeTag(String... tags) {
+	public synchronized Weaver removeTag(String... tags) {
 		ensureConfigurable();
 		removeTags.addAll(validateTags(tags));
 		return this;
@@ -247,17 +245,19 @@ public class Weaver implements IWeaver {
 	 * this method first starts. Failed weaving may be retried with that same configuration.
 	 */
 	public ChrysalisizedVault weave() throws IOException, IntegrityException {
-		if (vault != null || weaving) throw new IllegalStateException("Already weaved or weaving");
-		if (frozenContext == null) {
-			frozenContext = new WeaveContext(context.vault, artifact, context.sourcesDir, contextName, force,
-				parentName, ignores, removeIgnores, tags, removeTags);
+		synchronized (this) {
+			if (vault != null || weaving) throw new IllegalStateException("Already weaved or weaving");
+			if (frozenContext == null) {
+				frozenContext = new WeaveContext(context.vault, artifact, context.sourcesDir, contextName, force,
+					parentName, ignores, removeIgnores, tags, removeTags);
+			}
+			weaving = true;
 		}
-		weaving = true;
 		try {
 			vault = weave(frozenContext);
 			return vault;
 		} finally {
-			weaving = false;
+			synchronized (this) { weaving = false; }
 		}
 	}
 
@@ -276,22 +276,16 @@ public class Weaver implements IWeaver {
 		Chrysalis base = parent == null ? Chrysalis.EMPTY.clone() : destination.chrysalisize(artifact, parent).getChrysalis();
 		String algorithm = base.getBlobFactory().algorithm();
 		ChrysalisModification metadata = new ChrysalisModification(algorithm, Map.of(), context.ignores, context.removeIgnores);
-		Chrysalis visibility = metadata.applyTo(base);
+		metadata.applyTo(base);
 		VaultContext declaration = VaultContext.modification(parent, metadata, context.tags, context.removeTags);
-		if (parent == null) declaration = VaultContext.snapshot(visibility, context.tags);
 		destination.validateContext(artifact, name, declaration);
 
 		Chrysalis desired = ingest(destination, context.sourcesDir, base.getBlobFactory(), context.force && parent == null);
-		ChrysalisizedVault result;
-		if (parent == null) {
-			desired.setIgnoredPaths(visibility.getIgnoredPaths());
-			result = destination.saveSnapshot(artifact, name, desired, context.tags, context.force);
-		} else {
-			desired.setIgnoredPaths(base.getIgnoredPaths());
-			ChrysalisModification fileChanges = ChrysalisModification.between(base, desired);
-			ChrysalisModification modification = new ChrysalisModification(algorithm, fileChanges.changes(), context.ignores, context.removeIgnores);
-			result = destination.saveModification(artifact, name, parent, modification, context.tags, context.removeTags, context.force);
-		}
+		desired.setIgnoredPaths(base.getIgnoredPaths());
+		ChrysalisModification fileChanges = ChrysalisModification.between(base, desired);
+		ChrysalisModification modification = new ChrysalisModification(algorithm, fileChanges.changes(), context.ignores, context.removeIgnores);
+		ChrysalisizedVault result = destination.saveContext(artifact, name,
+			VaultContext.modification(parent, modification, context.tags, context.removeTags), context.force);
 		LOGGER.info(marker, "Wrote weaved version to: " + result.getChrysalisFile());
 		return result;
 	}
