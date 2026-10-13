@@ -16,6 +16,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.LongAdder;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -280,18 +281,38 @@ public class Weaver implements IWeaver {
 		VaultContext declaration = VaultContext.modification(parent, metadata, context.tags, context.removeTags);
 		destination.validateContext(artifact, name, declaration);
 
-		Chrysalis desired = ingest(destination, context.sourcesDir, base.getBlobFactory(), context.force && parent == null);
+		IngestResult ingested = ingest(destination, context.sourcesDir, base.getBlobFactory(), context.force && parent == null);
+		Chrysalis desired = ingested.chrysalis();
 		desired.setIgnoredPaths(base.getIgnoredPaths());
 		ChrysalisModification fileChanges = ChrysalisModification.between(base, desired);
 		ChrysalisModification modification = new ChrysalisModification(algorithm, fileChanges.changes(), context.ignores, context.removeIgnores);
 		ChrysalisizedVault result = destination.saveContext(artifact, name,
 			VaultContext.modification(parent, modification, context.tags, context.removeTags), context.force);
+		var blobs = desired.blobs();
+		LOGGER.info(marker, "Context '{}': scanned {} files ({} unique blobs, {} duplicate paths)",
+			name, blobs.size(), blobs.keySet().size(), blobs.size() - blobs.keySet().size());
+		LOGGER.info(marker, "Context '{}': {} blobs newly stored, {} reused, {} overwritten",
+			name, ingested.newlyStored(), ingested.reused(), ingested.overwritten());
+		if (parent != null) {
+			long additions = 0, replacements = 0, removals = 0;
+			for (var change : modification.changes().values()) {
+				switch (change.operation()) {
+					case ADD -> additions++;
+					case REPLACE -> replacements++;
+					case REMOVE -> removals++;
+				}
+			}
+			LOGGER.info(marker, "Modification '{}': {} file operations ({} additions, {} replacements, {} removals)",
+				name, modification.changes().size(), additions, replacements, removals);
+		}
 		LOGGER.info(marker, "Wrote weaved version to: " + result.getChrysalisFile());
 		return result;
 	}
 
+	private record IngestResult(Chrysalis chrysalis, long newlyStored, long reused, long overwritten) {}
+
 	/** Hashes and stores a directory without creating an intermediate manifest. */
-	private Chrysalis ingest(Vault vault, Path directory, BlobFactory factory, boolean force)
+	private IngestResult ingest(Vault vault, Path directory, BlobFactory factory, boolean force)
 		throws IOException, IntegrityException {
 		if (!Files.isDirectory(directory)) throw new IOException("Expected a source directory: " + directory);
 		List<Path> files;
@@ -299,14 +320,19 @@ public class Weaver implements IWeaver {
 			files = paths.filter(Files::isRegularFile).toList();
 		}
 		Set<Path> processed = ConcurrentHashMap.newKeySet();
+		LongAdder newlyStored = new LongAdder();
+		LongAdder reused = new LongAdder();
+		LongAdder overwritten = new LongAdder();
 		List<Callable<Map.Entry<Hash, Path>>> tasks = new ArrayList<>();
 		for (Path file : files) {
 			tasks.add(() -> {
 				Hash blob = factory.blob(file);
 				Path destination = vault.blobDir.resolve(blob.hash());
 				if (processed.add(destination)) {
-					if (!force && Files.exists(destination)) {
+					boolean existed = Files.exists(destination);
+					if (!force && existed) {
 						factory.blob(destination, blob).verify();
+						reused.increment();
 					} else {
 						Path staging = Files.createTempFile(vault.blobDir, ".weave-", ".tmp");
 						try {
@@ -315,8 +341,11 @@ public class Weaver implements IWeaver {
 							try {
 								if (force) Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING);
 								else Files.move(staging, destination);
+								if (force && existed) overwritten.increment();
+								else newlyStored.increment();
 							} catch (FileAlreadyExistsException race) {
 								factory.blob(destination, blob).verify();
+								reused.increment();
 							}
 						} finally {
 							Files.deleteIfExists(staging);
@@ -344,8 +373,7 @@ public class Weaver implements IWeaver {
 		}
 		Chrysalis result = Chrysalis.EMPTY.clone().factory(factory);
 		result.setBlobs(blobs);
-		LOGGER.info("Weaved {} files, {} unique blobs, {} duplicate paths", blobs.size(), blobs.keySet().size(), blobs.size() - blobs.keySet().size());
-		return result;
+		return new IngestResult(result, newlyStored.sum(), reused.sum(), overwritten.sum());
 	}
 
 
