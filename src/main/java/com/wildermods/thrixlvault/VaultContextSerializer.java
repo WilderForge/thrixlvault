@@ -50,13 +50,13 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 			out.setSerializeNulls(serializeNulls);
 		}
 		out.name("algorithm").value(algorithm);
-		writeGroups(out, "blobs", blobs);
-		writeGroups(out, "replacements", replacements);
-		writePaths(out, "removals", removals);
-		writePaths(out, "ignore", ignores);
-		writePaths(out, "removeIgnore", removeIgnores);
 		writeTags(out, "tags", value.tags());
 		writeTags(out, "removeTags", value.removeTags());
+		writePaths(out, "ignore", ignores);
+		writePaths(out, "removeIgnore", removeIgnores);
+		writePaths(out, "removals", removals);
+		writeGroups(out, "replacements", replacements);
+		writeGroups(out, "blobs", blobs);
 		out.endObject();
 	}
 
