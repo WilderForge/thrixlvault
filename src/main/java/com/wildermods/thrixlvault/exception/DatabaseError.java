@@ -128,7 +128,7 @@ public class DatabaseError extends Error {
 		return Arrays.stream(problems);
 	}
 	
-	public IntegrityProblem toProblem() {
+	public DatabaseProblem toProblem() {
 		return new DatabaseProblem(this);
 	}
 	
@@ -212,7 +212,7 @@ public class DatabaseError extends Error {
 		
 		public static DatabaseProblem fromThrown(Throwable t) {
 			if(t instanceof DatabaseError) {
-				return ((DatabaseIntegrityError) t).toProblem();
+				return ((DatabaseError) t).toProblem();
 			}
 			return new DatabaseProblem(() -> {
 				String message = t.getMessage();

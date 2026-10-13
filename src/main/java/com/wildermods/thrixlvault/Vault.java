@@ -3,7 +3,17 @@ package com.wildermods.thrixlvault;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Objects;
+import java.util.Set;
 
+import com.wildermods.masshash.BlobFactory;
+import com.wildermods.thrixlvault.exception.DatabaseVaultCircularityError;
 import com.wildermods.thrixlvault.exception.MissingVersionException;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
@@ -47,6 +57,189 @@ public class Vault {
 		return new ChrysalisizedVault(version, this);
 	}
 	
+	public ChrysalisizedVault chrysalisize(IVaultable version, String name) throws IOException, MissingVersionException {
+		return new ChrysalisizedVault(version, this, name);
+	}
+
+	/** Loads only the local declaration; does not resolve or verify its parent. */
+	VaultContext readDeclaration(IVaultable artifact, String name) throws IOException, MissingVersionException {
+		VaultContext context = readDeclaration(artifact, getChrysalisFile(artifact, name));
+		checkDefault(name, context);
+		return context;
+	}
+
+	private VaultContext readDeclaration(IVaultable artifact, Path file) throws IOException, MissingVersionException {
+		try (var reader = Files.newBufferedReader(file)) {
+			return Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class),
+				"Context contains null: " + file);
+		} catch (NoSuchFileException e) {
+			throw new MissingVersionException(artifact + " context at " + file, e);
+		}
+	}
+
+	/** Saves a named modification without replacing an existing declaration. */
+	public ChrysalisizedVault saveModification(IVaultable artifact, String name, String parent,
+		ChrysalisModification modification) throws IOException, MissingVersionException {
+		return saveModification(artifact, name, parent, modification, Set.of(), Set.of());
+	}
+
+	/** Saves a modification with locally declared tag additions and removals. */
+	public ChrysalisizedVault saveModification(IVaultable artifact, String name, String parent,
+		ChrysalisModification modification, Set<String> tags, Set<String> removeTags)
+		throws IOException, MissingVersionException {
+		return saveContext(artifact, name, VaultContext.modification(parent, modification, tags, removeTags));
+	}
+
+	/** Saves a full snapshot and its tags without replacing an existing declaration. */
+	public ChrysalisizedVault saveSnapshot(IVaultable artifact, String name, Chrysalis snapshot,
+		Set<String> tags) throws IOException, MissingVersionException {
+		return saveContext(artifact, name, VaultContext.snapshot(snapshot, tags));
+	}
+
+	/**
+	 * Validates and saves a local declaration within this vault. Inheritance is
+	 * resolved before writing, so invalid parents, cycles, and hash preconditions
+	 * do not overwrite the previous file. No blob bytes are read or generated.
+	 */
+	ChrysalisizedVault saveContext(IVaultable artifact, String name, VaultContext context)
+		throws IOException, MissingVersionException {
+		return saveContext(artifact, name, context, false);
+	}
+
+	/** @param replaceExisting whether an existing declaration may be overwritten */
+	ChrysalisizedVault saveContext(IVaultable artifact, String name, VaultContext context,
+		boolean replaceExisting) throws IOException, MissingVersionException {
+		requireContextName(name);
+		Objects.requireNonNull(context, "context");
+		ResolvedContext resolved = resolveContext(artifact, name, context);
+		String json = Weaver.GSON.toJson(context, VaultContext.class);
+		Path file = getChrysalisFile(artifact, name);
+		Files.createDirectories(file.getParent());
+		if (replaceExisting) {
+			Files.writeString(file, json, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+		} else {
+			Files.writeString(file, json, StandardOpenOption.CREATE_NEW);
+		}
+		return new ChrysalisizedVault(artifact, this, name, resolved);
+	}
+
+	/** Loads a named context, resolving snapshots and modifications uniformly. */
+	public ChrysalisizedVault loadContext(IVaultable artifact, String name) throws IOException, MissingVersionException {
+		return chrysalisize(artifact, name);
+	}
+
+	/**
+	 * Loads a JSON declaration using this vault for blobs. Every named parent must
+	 * be a sibling JSON file in the same directory as the loaded declaration.
+	 * An external file is not registered or saved in the vault by loading it.
+	 */
+	public ChrysalisizedVault load(IVaultable artifact, Path file) throws IOException, MissingVersionException {
+		Path source = file.toAbsolutePath().normalize();
+		String filename = source.getFileName().toString();
+		String name = filename.endsWith(".json") ? filename.substring(0, filename.length() - 5) : filename;
+		requireContextName(name);
+		boolean named = source.getParent().equals(getChrysalisFile(artifact).toAbsolutePath().normalize().getParent())
+			&& filename.endsWith(".json");
+		if (named) return chrysalisize(artifact, name);
+		return new ChrysalisizedVault(artifact, this, name,
+			resolveContext(artifact, name, null, source, false));
+	}
+
+	public ChrysalisizedVault saveModification(IVaultable artifact, String name, String parent,
+		ChrysalisModification modification, Set<String> tags, Set<String> removeTags, boolean replaceExisting)
+		throws IOException, MissingVersionException {
+		return saveContext(artifact, name, VaultContext.modification(parent, modification, tags, removeTags), replaceExisting);
+	}
+
+	public ChrysalisizedVault saveSnapshot(IVaultable artifact, String name, Chrysalis snapshot,
+		Set<String> tags, boolean replaceExisting) throws IOException, MissingVersionException {
+		return saveContext(artifact, name, VaultContext.snapshot(snapshot, tags), replaceExisting);
+	}
+
+	void validateContext(IVaultable artifact, String name, VaultContext declaration) throws IOException, MissingVersionException {
+		resolveContext(artifact, name, declaration);
+	}
+
+	ResolvedContext resolveContext(IVaultable artifact, String name) throws IOException, MissingVersionException {
+		return resolveContext(artifact, name, null);
+	}
+
+	private ResolvedContext resolveContext(IVaultable artifact, String name, VaultContext proposed)
+		throws IOException, MissingVersionException {
+		return resolveContext(artifact, requireContextName(name), proposed, getChrysalisFile(artifact, name), true);
+	}
+
+	private ResolvedContext resolveContext(IVaultable artifact, String name, VaultContext proposed, Path source, boolean named)
+		throws IOException, MissingVersionException {
+		// A relationship is a local context name, never a path to another directory.
+		Path directory = source.getParent();
+		var layers = new ArrayList<ContextLayer>();
+		Set<String> seen = new LinkedHashSet<>();
+		String current = name;
+		Path currentFile = source;
+		while (current != null) {
+			requireContextName(current);
+			// Track filenames so an arbitrary JSON file without a .json extension
+			// can still refer to a distinct sibling named <context>.json.
+			String filename = currentFile.getFileName().toString();
+			if (!seen.add(filename)) {
+				var cycle = new ArrayList<>(seen);
+				cycle.add(filename);
+				throw new DatabaseVaultCircularityError(this, cycle.toArray(String[]::new));
+			}
+			VaultContext declaration = layers.isEmpty() && proposed != null ? proposed : readDeclaration(artifact, currentFile);
+			if (named) checkDefault(current, declaration);
+			layers.add(new ContextLayer(current, declaration));
+			current = declaration.parent();
+			if (current != null) currentFile = directory.resolve(requireContextName(current) + ".json");
+		}
+
+		Collections.reverse(layers);
+		Chrysalis result = null;
+		Set<String> tags = new HashSet<>();
+		ChrysalisizedVault parent = null;
+		ResolvedContext resolved = null;
+		for (int index = 0; index < layers.size(); index++) {
+			ContextLayer layer = layers.get(index);
+			VaultContext declaration = layer.declaration();
+			ChrysalisModification modification = declaration.modification();
+			if (result == null) {
+				try {
+					result = Chrysalis.EMPTY.clone().factory(new BlobFactory(modification.algorithm()));
+				} catch (java.security.NoSuchAlgorithmException e) {
+					throw new IOException(e);
+				}
+			}
+			result = modification.applyTo(result);
+			tags.removeAll(declaration.removeTags());
+			tags.addAll(declaration.tags());
+			Path file = index == layers.size() - 1 ? source : directory.resolve(layer.name() + ".json");
+			resolved = new ResolvedContext(result, Set.copyOf(tags), declaration, parent, file, named);
+			if (index < layers.size() - 1) parent = new ChrysalisizedVault(artifact, this, layer.name(), resolved);
+		}
+		return resolved;
+	}
+
+	private record ContextLayer(String name, VaultContext declaration) {}
+
+	private static void checkDefault(String name, VaultContext context) {
+		if (name.equals("blobs") && context.parent() != null) {
+			throw new IllegalArgumentException("The default 'blobs' context must be parentless");
+		}
+	}
+
+	static String requireContextName(String name) {
+		Objects.requireNonNull(name, "context name");
+		if (name.isBlank() || name.equals(".") || name.equals("..") || name.contains("/")
+			|| name.contains("\\") || name.contains(":")) {
+			throw new IllegalArgumentException("Expected a context name without path components: " + name);
+		}
+		return name;
+	}
+
+	record ResolvedContext(Chrysalis chrysalis, Set<String> tags, VaultContext declaration,
+		ChrysalisizedVault parent, Path source, boolean named) {}
+	
 	public Path getVaultDir() {
 		return vaultDir;
 	}
@@ -56,11 +249,20 @@ public class Vault {
 	}
 	
 	public boolean hasChrysalis(IVaultable artifact) {
-		return Files.exists(getChrysalisFile(artifact));
+		return hasChrysalis(artifact, "blobs");
+	}
+	
+	public boolean hasChrysalis(IVaultable artifact, String name) {
+		return Files.exists(getChrysalisFile(artifact, name));
 	}
 
 	public Path getChrysalisFile(IVaultable artifact) {
-		return vaultDir.resolve(artifact.artifactPath()).resolve("blobs.json");
+		return getChrysalisFile(artifact, "blobs");
+	}
+	
+	public Path getChrysalisFile(IVaultable artifact, String name) {
+		requireContextName(name);
+		return vaultDir.resolve(artifact.artifactPath()).resolve(name + ".json");
 	}
 	
 	@Override

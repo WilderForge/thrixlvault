@@ -3,16 +3,16 @@ package com.wildermods.thrixlvault;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
+import java.util.HashSet;
+import java.util.Objects;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.google.common.collect.Multimaps;
-import com.google.common.collect.Ordering;
+import com.google.common.collect.ImmutableSetMultimap;
 import com.google.common.collect.SetMultimap;
-import com.google.common.collect.TreeMultimap;
 import com.google.gson.JsonIOException;
 import com.google.gson.JsonSyntaxException;
 
@@ -47,8 +47,88 @@ import com.wildermods.masshash.utils.Reference;
  * </p>
  */
 public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
+
+	private Set<Path> ignoredPaths = Set.of();
+	private volatile SetMultimap<Hash, Path> activeBlobsCache;
+
+	/** @return immutable, explicit ignore roots retained by this snapshot */
+	public Set<Path> getIgnoredPaths() {
+		return ignoredPaths;
+	}
+
+	/**
+	 * Checks whether a relative path or any ancestor has an explicit ignore.
+	 * This is a lexical check and never accesses the filesystem. A root covers
+	 * both itself and all descendants, regardless of whether it currently exists.
+	 */
+	public boolean isIgnored(Path path) {
+		Path normalized = ChrysalisModification.normalizePath(path);
+		for (Path current = normalized; current != null; current = current.getParent()) {
+			if (ignoredPaths.contains(current)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	synchronized void setIgnoredPaths(Set<Path> ignoredPaths) {
+		Set<Path> normalized = new HashSet<>();
+		for (Path path : Objects.requireNonNull(ignoredPaths, "ignoredPaths")) {
+			normalized.add(ChrysalisModification.normalizePath(path));
+		}
+		this.ignoredPaths = Set.copyOf(normalized);
+		activeBlobsCache = null;
+	}
+
+	/**
+	 * Returns only expectations visible to checking and materialization. Stored
+	 * expectations remain in {@link #blobs()} so removing an ignore restores them.
+	 * Shared hashes remain present whenever at least one path is not ignored.
+	 * The immutable result is computed lazily and reused. With no ignores it is
+	 * the stored immutable multimap itself. Internal setters invalidate the cache.
+	 *
+	 * @return an immutable hash-to-paths map with ignored paths excluded
+	 */
+	public SetMultimap<Hash, Path> activeBlobs() {
+		SetMultimap<Hash, Path> cached = activeBlobsCache;
+		if (cached == null) {
+			synchronized (this) {
+				cached = activeBlobsCache;
+				if (cached == null) {
+					if (ignoredPaths.isEmpty()) {
+						cached = blobs;
+					} else {
+						ImmutableSetMultimap.Builder<Hash, Path> active = ImmutableSetMultimap.builder();
+						blobs.forEach((hash, path) -> {
+							if (!isIgnored(path)) {
+								active.put(hash, path);
+							}
+						});
+						cached = active.build();
+					}
+					activeBlobsCache = cached;
+				}
+			}
+		}
+		return cached;
+	}
+
+	// Task-local view only. Composition must use the original, retained snapshot.
+	synchronized Chrysalis checkingSnapshot() {
+		Chrysalis active = new Chrysalis();
+		active.factory(blobFactory);
+		active.blobs = activeBlobs();
+		active.activeBlobsCache = active.blobs;
+		active.ignoredPaths = ignoredPaths;
+		return active;
+	}
 	
 	protected static final Logger LOGGER = LogManager.getLogger();
+	private static final SetMultimap<Hash, Path> EMPTY_SETMULTIMAP = ImmutableSetMultimap.of();
+	public static final Chrysalis EMPTY = new Chrysalis();
+	static {
+		EMPTY.blobs = EMPTY_SETMULTIMAP;
+	}
 	
 	/**
 	 * Creates an empty {@code Chrysalis}. 
@@ -61,7 +141,7 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 */
 	@Deprecated(forRemoval = false)
 	protected Chrysalis() {
-		// NO-OP
+		blobs = ImmutableSetMultimap.of();
 	}
 	
 	/**
@@ -85,6 +165,7 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	@Deprecated(forRemoval = false)
 	protected Chrysalis(Path dir, BiConsumer<Reference<Path>, IBlob> forEachBlob) throws IOException {
 		super(Files.walk(dir), forEachBlob);
+		setBlobs(blobs);
 	}
 
 	/**
@@ -121,6 +202,7 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 * are recreated exactly as stored.
 	 * </p>
 	 *
+	 * @deprecated Use {@link Vault#load(com.wildermods.thrixlvault.steam.IVaultable, Path)} to load either declaration type with its vault context.
 	 * @param path the JSON file containing a serialized Chrysalis
 	 * @return the deserialized {@code Chrysalis}
 	 * 
@@ -128,15 +210,21 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 * @throws JsonSyntaxException if the JSON is invalid
 	 * @throws JsonIOException if deserialization fails
 	 */
+	@Deprecated(forRemoval = false)
 	public static Chrysalis fromFile(Path path) throws JsonSyntaxException, JsonIOException, IOException {
-		return Weaver.GSON.fromJson(Files.newBufferedReader(path), Chrysalis.class);
+		try (var reader = Files.newBufferedReader(path)) {
+			VaultContext context = Objects.requireNonNull(Weaver.GSON.fromJson(reader, VaultContext.class),
+				"Snapshot file contains null");
+			if (context.parent() != null) throw new IOException("A parent must be resolved through its Vault: " + path);
+			return context.rootSnapshot();
+		}
 	}
 	
 	/**
 	 * Compares this {@code Chrysalis} to another object for equality.
 	 * <p>
 	 * Two Chrysalis instances are considered equal if and only if their underlying
-	 * hash-path mappings contain exactly the same entries. The comparison is
+	 * hash-path mappings and explicit ignore roots contain the same entries. The comparison is
 	 * structural and does not depend on object identity.
 	 * </p>
 	 *
@@ -147,34 +235,28 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	@Override
 	public boolean equals(Object o) {
 		if(o instanceof Chrysalis) {
-			return this.blobs.equals(((Chrysalis)o).blobs);
+			return this.blobs.equals(((Chrysalis)o).blobs)
+				&& this.ignoredPaths.equals(((Chrysalis)o).ignoredPaths);
 		}
 		return false;
 	}
 	
 	/**
-	 * Returns a deep copy of this {@code Chrysalis}.
+	 * Returns a distinct snapshot sharing this snapshot's immutable data.
 	 * <p>
-	 * The underlying multimap is reconstructed with the same hash-path pairs and
-	 * wrapped again in a synchronized {@code SetMultimap}.
+	 * Stored expectations, ignore roots, and an already computed active map may
+	 * be shared safely. Internal setters on either snapshot replace that snapshot's
+	 * data and invalidate only its own cache.
 	 * </p>
 	 */
 	@Override
-	public Chrysalis clone() {
+	public synchronized Chrysalis clone() {
 		Chrysalis chrysalis = new Chrysalis();
+		chrysalis.factory(blobFactory);
+		chrysalis.ignoredPaths = ignoredPaths;
 		
-		chrysalis.blobs = TreeMultimap.create(
-			Comparator.comparing(Hash::hash),
-			Ordering.natural()
-		);
-
-		for(Hash key : this.blobs.keySet()) {
-			for(Path path : this.blobs.values()) {
-				chrysalis.blobs.put(key, path);
-			}
-		}
-		
-		chrysalis.blobs = Multimaps.synchronizedSetMultimap(chrysalis.blobs);
+		chrysalis.blobs = blobs;
+		chrysalis.activeBlobsCache = activeBlobsCache;
 		
 		return chrysalis;
 	}
@@ -183,19 +265,27 @@ public class Chrysalis extends Hasher<Chrysalis> implements Cloneable {
 	 * Returns the multimap of computed {@link Hash} values to the file {@link Path}s
 	 * from which those hashes were generated.
 	 *
-	 * @return a thread-safe multimap of hash→paths
+	 * Ignored expectations are retained here. Use {@link #activeBlobs()} when
+	 * checking or materializing the effective file set.
+	 * @return an immutable multimap of all stored hash→paths
 	 */
 	public SetMultimap<Hash, Path> blobs() {
 		return blobs;
 	}
 
 	/**
+	 * Copies expectations into an immutable map and invalidates the active cache.
+	 * The input map may be changed afterwards without affecting this snapshot.
 	 * @deprecated This method is intended for internal use only.
 	 * Normal code should not mutate a Chrysalis after creation.</p>
 	 */
 	@Deprecated(forRemoval = false)
-	public void setBlobs(SetMultimap<Hash, Path> blobs) {
-		this.blobs = blobs;
+	public synchronized void setBlobs(SetMultimap<Hash, Path> blobs) {
+		Objects.requireNonNull(blobs, "blobs");
+		synchronized (blobs) {
+			this.blobs = ImmutableSetMultimap.copyOf(blobs);
+		}
+		activeBlobsCache = null;
 	}
 	
 	public BlobFactory getBlobFactory() {

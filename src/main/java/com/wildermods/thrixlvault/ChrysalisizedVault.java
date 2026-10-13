@@ -2,10 +2,11 @@ package com.wildermods.thrixlvault;
 
 import java.io.IOException;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -22,7 +23,6 @@ import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimaps;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.SetMultimap;
-import com.wildermods.masshash.Blob;
 import com.wildermods.masshash.BlobFactory;
 import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
@@ -63,7 +63,15 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	
 	final IVaultable artifact;
 	final Chrysalis chrysalis;
+	final String name;
 	final Marker marker;
+	private final VaultContext context;
+	private final Set<String> tags;
+	private final Vault owningVault;
+	private final ChrysalisizedVault inheritedParent;
+	private final Path sourceFile;
+	/** Whether this declaration belongs to the owning vault's artifact directory. */
+	private final boolean owned;
 	
 	
 	/**
@@ -75,8 +83,21 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @throws IOException if an I/O error occurs while reading the chrysalis
 	 * @throws MissingVersionException if the chrysalis file for the artifact is missing
 	 */
-	ChrysalisizedVault(IVaultable artifact, Vault parent) throws IOException, MissingVersionException {
-		this(artifact, parent, handleFromFile(artifact, parent));
+	protected ChrysalisizedVault(IVaultable artifact, Vault parent) throws IOException, MissingVersionException {
+		this(artifact, parent, "blobs");
+	}
+	
+	/**
+	 * Constructs a ChrysalisizedVault for the given artifact by loading its Chrysalis
+	 * from the parent vault.
+	 *
+	 * @param artifact the versioned artifact
+	 * @param parent the vault containing the artifact
+	 * @throws IOException if an I/O error occurs while reading the chrysalis
+	 * @throws MissingVersionException if the chrysalis file for the artifact is missing
+	 */
+	protected ChrysalisizedVault(IVaultable artifact, Vault parent, String name) throws IOException, MissingVersionException {
+		this(artifact, parent, name, parent.resolveContext(artifact, name));
 	}
 	
 	/**
@@ -87,11 +108,78 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @param chrysalis the pre-computed chrysalis for the artifact
 	 * @throws IOException if an I/O error occurs while initializing the vault
 	 */
-	ChrysalisizedVault(IVaultable artifact, Vault parent, Chrysalis chrysalis) throws IOException {
+	protected ChrysalisizedVault(IVaultable artifact, Vault parent, Chrysalis chrysalis) throws IOException {
+		this(artifact, parent, "blobs", chrysalis);
+	}
+	
+	protected ChrysalisizedVault(IVaultable artifact, Vault parent, String name, Chrysalis chrysalis) throws IOException {
+		this(artifact, parent, name, chrysalis, Set.of(), null, null, null, false);
+	}
+
+	ChrysalisizedVault(IVaultable artifact, Vault parent, String name, Vault.ResolvedContext resolved) throws IOException {
+		this(artifact, parent, name, resolved.chrysalis(), resolved.tags(), resolved.declaration(),
+			resolved.parent(), resolved.source(), resolved.named());
+	}
+
+	private ChrysalisizedVault(IVaultable artifact, Vault parent, String name, Chrysalis chrysalis,
+		Set<String> tags, VaultContext context, ChrysalisizedVault inheritedParent, Path sourceFile, boolean owned) throws IOException {
 		super(parent.vaultDir);
-		this.chrysalis = chrysalis;
+		this.chrysalis = Objects.requireNonNull(chrysalis, "chrysalis");
+		this.name = name;
 		this.artifact = artifact;
 		this.marker = MarkerManager.getMarker(artifact.name());
+		this.tags = Set.copyOf(tags);
+		this.context = context;
+		this.inheritedParent = inheritedParent;
+		this.sourceFile = sourceFile;
+		this.owned = owned;
+		this.owningVault = parent instanceof ChrysalisizedVault view ? view.getVault() : parent;
+	}
+
+	/** @return the owning vault, shared by all named and temporary views */
+	public Vault getVault() { return owningVault; }
+
+	/** @return resolved tags, including inherited additions and removals */
+	public Set<String> getTags() { return tags; }
+	/** @return the local declaration, absent for temporary in-memory compositions */
+	Optional<VaultContext> getContext() { return Optional.ofNullable(context); }
+	/** @return the selected context name, without its JSON extension */
+	public String getContextName() { return name; }
+
+	/** Returns tags added by this declaration, excluding inherited tags. */
+	public Set<String> getLocalTags() { return context == null ? Set.of() : context.tags(); }
+	/** Returns tag removals explicitly declared in this layer. */
+	public Set<String> getRemovedTags() { return context == null ? Set.of() : context.removeTags(); }
+
+	/** Returns the immediate resolved parent, absent for a parentless declaration. */
+	public Optional<ChrysalisizedVault> getParent() { return Optional.ofNullable(inheritedParent); }
+
+	/** Returns the oldest ancestor, or this instance when it has no parent. */
+	public ChrysalisizedVault getRoot() {
+		ChrysalisizedVault root = this;
+		while (root.inheritedParent != null) root = root.inheritedParent;
+		return root;
+	}
+
+	/** Loads an existing named context whose immediate declared parent is this context. */
+	public ChrysalisizedVault getChild(String name) throws IOException, MissingVersionException {
+		if (!owned) throw new IllegalStateException("Only a named vault context can load a child");
+		ChrysalisizedVault child = owningVault.chrysalisize(artifact, name);
+		// Loading through this owner and artifact fixes the directory; compare local names.
+		if (!this.name.equals(child.context.parent())) {
+			throw new IllegalArgumentException("Context '" + name + "' is not an immediate child of '" + this.name + "'");
+		}
+		return child;
+	}
+
+	/** Saves the local declaration under a vault name, preserving inheritance and local tags. */
+	public ChrysalisizedVault saveAs(String name) throws IOException, MissingVersionException {
+		return saveAs(name, false);
+	}
+
+	public ChrysalisizedVault saveAs(String name, boolean replaceExisting) throws IOException, MissingVersionException {
+		if (context == null) throw new IllegalStateException("A temporary composition has no local declaration; use saveSnapshot instead");
+		return owningVault.saveContext(artifact, name, context, replaceExisting);
 	}
 
 	/**
@@ -101,6 +189,32 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 */
 	public Chrysalis getChrysalis() {
 		return chrysalis;
+	}
+
+	/**
+	 * Returns a new vault view with the supplied modifications applied in order.
+	 * The original snapshot and stored manifests are left unchanged; the returned
+	 * view uses the same content-addressed blob directory.
+	 * <p>
+	 * This method does not persist the resolved snapshot or transform blob bytes.
+	 * The name identifies the resolved manifest if the caller later saves it.
+	 * Export to a fresh directory to obtain exactly the resolved file set; existing
+	 * directory verification checks required files but does not reject extra files.
+	 *
+	 * @param name the name for the resolved snapshot, without the JSON extension
+	 * @param modifications modifications to apply in their supplied order
+	 * @return a new view of the resolved snapshot
+	 * @throws IOException if initializing the vault view fails
+	 * @throws IllegalArgumentException if a modification cannot be applied
+	 */
+	public ChrysalisizedVault withModifications(String name, ChrysalisModification... modifications) throws IOException {
+		Objects.requireNonNull(name, "name");
+		Objects.requireNonNull(modifications, "modifications");
+		Chrysalis resolved = modifications.length == 0 ? chrysalis.clone() : chrysalis;
+		for (ChrysalisModification modification : modifications) {
+			resolved = Objects.requireNonNull(modification, "modification").applyTo(resolved);
+		}
+		return new ChrysalisizedVault(artifact, this, name, resolved, tags, null, this, null, false);
 	}
 	
 	/**
@@ -115,7 +229,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		final SetMultimap<Hash, IntegrityProblem> problems = Multimaps.synchronizedSetMultimap(HashMultimap.create());
 
 		final BlobFactory factory = chrysalis.getBlobFactory();
-		computeOverBlobs((hash, vaultDir, chrysalis) -> {
+		computeOverBlobs((hash, vaultDir, chrysalis, handler) -> {
 			Path blobFile = vaultDir.resolve(hash.hash());
 			try {
 				if (!Files.exists(blobFile)) {
@@ -124,11 +238,9 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 					throw err;
 				}
 				
-				try {
-					factory.blob(blobFile, hash).verify();
-				}
-				catch(IntegrityException e) {
-					throw new DatabaseIntegrityError("Corrupted blob - " + e.getMessage(), e);
+				IntegrityProblem problem = factory.blob(blobFile, hash).check();
+				if (problem != null) {
+					throw new DatabaseIntegrityError("Corrupted blob - " + problem.getMessage());
 				}
 			}
 			catch (Throwable t) {
@@ -145,7 +257,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		});
 
 		if(problems.size() == 0) {
-			LOGGER.info(marker, "Database Verification successful. All " + chrysalis.blobs().keys().elementSet().size() + " blobs are present and valid.");
+			LOGGER.info(marker, "Database Verification successful. All " + chrysalis.activeBlobs().keySet().size() + " active blobs are present and valid.");
 		}
 		else {
 			String message = "Database Verification Failed";
@@ -189,15 +301,15 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 			LOGGER.warn(marker, "Skipping database verification.");
 		}
 		final BlobFactory factory = chrysalis.getBlobFactory();
-		computeOverBlobs((hash, vaultDir, chrysalis) -> {
+		computeOverBlobs((hash, vaultDir, chrysalis, handler) -> {
 			Set<Path> resources = chrysalis.blobs().get(hash);
 			
 			for(Path localizedResource : resources) {
+				Path resource = path.resolve(localizedResource);
+				if(!Files.exists(resource)) {
+					throw new MissingResourceException("Missing Resource - " + hash + " (" + resource + ")", () -> resource);
+				}
 				try {
-					Path resource = path.resolve(localizedResource);
-					if(!Files.exists(resource)) {
-						throw new MissingResourceException("Missing Resource - " + hash + " (" + resource + ")");
-					}
 					factory.blob(resource, hash).verify();
 				}
 				catch(Throwable t) {
@@ -215,7 +327,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		});
 		
 		if(problems.size() == 0) {
-			LOGGER.info(marker, "Verification successful. All " + chrysalis.blobs().values().size() + " expected resources are present and valid.");
+			LOGGER.info(marker, "Verification successful. All " + chrysalis.activeBlobs().size() + " active expected resources are present and valid.");
 		}
 		else {
 			String message = "Verification Failed";
@@ -224,19 +336,28 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		}
 	}
 	
+	public final void computeOverBlobs(HashTask hashTask) throws InterruptedException, ExecutionException {
+		computeOverBlobs(hashTask, HashTask.DEFAULT_PROBLEM_HANDLER);
+	}
+	
 	/**
 	 * Iterates over all blobs in the artifact and applies the given {@link HashTask}.
 	 *
+	 * <p>Ignored paths are excluded before tasks are scheduled. Each task receives
+	 * a view containing only active expectations. A hash shared with an active
+	 * path is still processed, but its ignored paths are absent from that view.
 	 * <p>This method processes blobs in parallel using a thread pool
 	 * sized according to the number of available processors.</p>
 	 *
 	 * @param hashTask the task to execute for each blob
+	 * @param problemHandler a problem handler that can handle problems that occur when computing
 	 * 
 	 * @throws InterruptedException if execution is interrupted
 	 * @throws ExecutionException if a task throws an exception
 	 */
-	public void computeOverBlobs(HashTask hashTask) throws InterruptedException, ExecutionException {
-	    Multiset<Hash> hashes = chrysalis.blobs().keys();
+	public void computeOverBlobs(HashTask hashTask, HashTask.ProblemHandler problemHandler) throws InterruptedException, ExecutionException {
+	    final Chrysalis active = chrysalis.checkingSnapshot();
+	    Multiset<Hash> hashes = active.blobs().keys();
 	    int threads = Runtime.getRuntime().availableProcessors();
 	    ExecutorService executor = Executors.newFixedThreadPool(threads);
 	    List<Future<Void>> futures = new ArrayList<>();
@@ -247,7 +368,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	        for (Hash hash : hashes.elementSet()) {
 	            Future<Void> future = executor.submit(() -> {
 	            	if(!terminated[0]) {
-	            		hashTask.call(hash, blobDir, chrysalis);
+	                    hashTask.call(hash, blobDir, active, problemHandler);
 	            	}
 	                return null;
 	            });
@@ -289,14 +410,13 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 		if(verifyBlobs) {
 			verifyBlobs();
 		}
-		final BlobFactory factory = chrysalis.getBlobFactory();
-		computeOverBlobs((hash, path, chrysalis) -> {
-			Blob blob = factory.blob(path.resolve(hash.hash()), hash);
+		computeOverBlobs((hash, path, chrysalis, handler) -> {
+			Path blob = path.resolve(hash.hash());
 			Set<Path> dests = chrysalis.blobs().get(hash);
 			for(Path relativeDest : dests) {
 				Path dest = destDir.resolve(relativeDest);
 				Files.createDirectories(dest.getParent());
-				Files.copy(blob.dataStream(), dest);
+				Files.copy(blob, dest);
 			}
 		});
 		verifyDirectory(destDir, false);
@@ -352,7 +472,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @return {@code true} if the Chrysalis file exists
 	 */
 	public boolean hasChrysalis() {
-		return hasChrysalis(this);
+		return sourceFile != null && Files.exists(sourceFile);
 	}
 	
 	/**
@@ -361,7 +481,7 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	 * @return the path to the chrysalis JSON file
 	 */
 	public Path getChrysalisFile() {
-		return getChrysalisFile(this);
+		return sourceFile == null ? owningVault.getChrysalisFile(artifact, name) : sourceFile;
 	}
 	
 	public Path getBlobFile(Hash hash) {
@@ -370,15 +490,6 @@ public class ChrysalisizedVault extends Vault implements IVaultable {
 	
 	public Path getBlobFile(Path blobDir, Hash hash) {
 		return blobDir.resolve(hash.hash());
-	}
-	
-	private static final Chrysalis handleFromFile(IVaultable version, Vault vault) throws IOException, MissingVersionException {
-		try {
-			return Chrysalis.fromFile(vault.getChrysalisFile(version));
-		}
-		catch(NoSuchFileException e) {
-			throw new MissingVersionException(version.toString(), e);
-		}
 	}
 	
 	/**

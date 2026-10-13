@@ -1,27 +1,37 @@
 package com.wildermods.thrixlvault;
 
 import java.io.IOException;
-import java.nio.file.CopyOption;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
-import java.nio.file.OpenOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
-import java.nio.file.StandardOpenOption;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.LongAdder;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.Marker;
 import org.apache.logging.log4j.MarkerManager;
 
+import com.google.common.collect.TreeMultimap;
 import com.google.gson.FormattingStyle;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.wildermods.masshash.BlobFactory;
+import com.wildermods.masshash.Hash;
 import com.wildermods.masshash.exception.IntegrityException;
 import com.wildermods.thrixlvault.exception.VersionAlreadyWeavedException;
+import com.wildermods.thrixlvault.exception.DatabaseVaultCircularityError;
 import com.wildermods.thrixlvault.steam.IDownload;
 import com.wildermods.thrixlvault.steam.IVaultable;
 
@@ -30,22 +40,26 @@ import com.wildermods.thrixlvault.steam.IVaultable;
  * The {@code Weaver} class is responsible for processing (or "weaving") a {@link Vault}
  * by scanning a source directory, computing content-based hashes, and writing any new
  * or updated blobs into the vault's designated blob store. It also serializes a 
- * {@link Chrysalis} manifest inside the vault's designated version directory for later
+ * snapshot or modification declaration inside the vault's designated version directory for later
  * deserialization and validation.
  * <p>
  * If a version has already been weaved (i.e., its manifest already exists) and {@code force}
  * is not enabled, a {@link VersionAlreadyWeavedException} is thrown to prevent accidental overwrites.
  * <p>
+ * Fluent methods configure the name, parent, ignores, tags and force behavior before
+ * {@link #weave()} starts. Without a parent it saves a standalone snapshot; with a
+ * parent it saves a modification of the complete desired source directory.
+ * <p>
  * This class is designed to ensure blob integrity and can validate that all blobs referenced
  * in a manifest exist and are unmodified.
  */
-public class Weaver implements IVaultable {
+public class Weaver implements IWeaver {
 	
 	/** Gson instance for serializing Chrysalis manifests. */
 	public static final Gson GSON;
 	static {
 		GsonBuilder builder = new GsonBuilder();
-		builder.registerTypeAdapter(Chrysalis.class, new ChrysalisSerializer());
+		builder.registerTypeAdapterFactory(new VaultContextSerializer());
 		builder.setPrettyPrinting().setFormattingStyle(FormattingStyle.PRETTY.withIndent("\t"));
 		GSON = builder.create();
 	}
@@ -56,17 +70,28 @@ public class Weaver implements IVaultable {
 	/** The directory where blob files are stored. */
 	public static final Path BLOB_DIR = OUTPUT_DIR.resolve("blobs");
 	
-	private static final Logger LOGGER = LogManager.getLogger();
+	protected static final Logger LOGGER = LogManager.getLogger();
 	
-	private final ChrysalisizedVault vault;
-	private final IVaultable artifact;
-	private final Marker marker;
+	protected ChrysalisizedVault vault;
+	protected final IVaultable artifact;
+	protected final Marker marker;
+	
+	private final WeaveContext context;
+	private String contextName;
+	private String parentName;
+	private boolean force;
+	private final Set<Path> ignores = new LinkedHashSet<>();
+	private final Set<Path> removeIgnores = new LinkedHashSet<>();
+	private final Set<String> tags = new LinkedHashSet<>();
+	private final Set<String> removeTags = new LinkedHashSet<>();
+	private WeaveContext frozenContext;
+	private boolean weaving;
 	
     /**
      * Constructs a new {@code Weaver} for the given vault and version string.
      *
      * @param vault the vault to weave into
-     * @param version the version string to associate with the weaved result
+     * @param artifact the versioned artifact to associate with the result
      * @param sourcesDir the directory to scan for files
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if an integrity violation occurs
@@ -75,27 +100,118 @@ public class Weaver implements IVaultable {
 		this(vault, artifact, sourcesDir, false);
 	}
 	
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, String name) throws IOException, IntegrityException {
+		this(vault, artifact, sourcesDir, name, false);
+	}
+	
 
     /**
      * Constructs a new {@code Weaver} with the option to force overwrite an existing weaved version.
      *
      * @param vault the vault weave into
-     * @param version the version string to associate with the weaved result
+     * @param artifact the versioned artifact to associate with the result
      * @param sourcesDir the directory to scan for files
      * @param force whether to overwrite existing data
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if an integrity violation occurs
      */
 	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, boolean force) throws IOException, IntegrityException {
-		this.artifact = artifact;
-		this.vault = weave(sourcesDir, vault, force);
-		this.marker = MarkerManager.getMarker(artifact.name());
+		this(new WeaveContext(vault, artifact, sourcesDir, "blobs", force));
+	}
+	
+	public Weaver(Vault vault, IVaultable artifact, Path sourcesDir, String name, boolean force) throws IOException, IntegrityException {
+		this(new WeaveContext(vault, artifact, sourcesDir, name, force));
+	}
+	
+	private Weaver(WeaveContext context) {
+		this.context = context;
+		this.marker = MarkerManager.getMarker(context.artifact.name());
+		this.artifact = context.artifact;
+		this.contextName = context.name;
+		this.parentName = context.parent;
+		this.force = context.force;
+		this.ignores.addAll(context.ignores);
+		this.removeIgnores.addAll(context.removeIgnores);
+		this.tags.addAll(context.tags);
+		this.removeTags.addAll(context.removeTags);
 	}
 	
 	public Weaver(Vault vault, IDownload download) throws IOException, IntegrityException {
 		 this(vault, download, download.dest());
 	}
 	
+	/** Selects the output declaration name; defaults to {@code blobs}. */
+	public Weaver name(String name) {
+		ensureConfigurable();
+		this.contextName = Vault.requireContextName(name);
+		return this;
+	}
+
+	/** Selects a parent in the same artifact directory; null produces a full snapshot. */
+	public Weaver parent(String name) {
+		ensureConfigurable();
+		this.parentName = name == null ? null : Vault.requireContextName(name);
+		return this;
+	}
+
+	/**
+	 * Permits replacing the output declaration. For standalone snapshots this also
+	 * repairs stored blobs, matching the existing force constructors. Child weaving
+	 * verifies and reuses shared blobs without overwriting them.
+	 */
+	public Weaver force(boolean force) {
+		ensureConfigurable();
+		this.force = force;
+		return this;
+	}
+
+	/** Adds explicit ignore roots. Their bytes are still stored for later restoration. */
+	public Weaver ignore(Path... paths) {
+		ensureConfigurable();
+		ignores.addAll(normalizePaths(paths));
+		return this;
+	}
+
+	/** Removes exact inherited ignore roots; roots must exist in the parent. */
+	public Weaver removeIgnore(Path... paths) {
+		ensureConfigurable();
+		removeIgnores.addAll(normalizePaths(paths));
+		return this;
+	}
+
+	/** Adds local tags; unknown tags are preserved. */
+	public Weaver tag(String... tags) {
+		ensureConfigurable();
+		this.tags.addAll(validateTags(tags));
+		return this;
+	}
+
+	/** Subtracts inherited tags; removing an absent tag is harmless. */
+	public Weaver removeTag(String... tags) {
+		ensureConfigurable();
+		removeTags.addAll(validateTags(tags));
+		return this;
+	}
+
+	private void ensureConfigurable() {
+		if (frozenContext != null) throw new IllegalStateException("Configuration is fixed once weaving starts");
+	}
+
+	private Set<Path> normalizePaths(Path[] paths) {
+		Set<Path> normalized = new LinkedHashSet<>();
+		for (Path path : Objects.requireNonNull(paths, "paths")) normalized.add(ChrysalisModification.normalizePath(path));
+		return normalized;
+	}
+
+	private Set<String> validateTags(String[] tags) {
+		Set<String> validated = new LinkedHashSet<>();
+		for (String tag : Objects.requireNonNull(tags, "tags")) {
+			if (Objects.requireNonNull(tag, "tag").isBlank()) throw new IllegalArgumentException("Tags must not be blank");
+			validated.add(tag);
+		}
+		return validated;
+	}
+
     /**
      * Gets the {@link ChrysalisizedVault} produced by this weaving operation.
      *
@@ -109,92 +225,151 @@ public class Weaver implements IVaultable {
      * Verifies the integrity of all blobs in the weaved vault.
      * This method ensures that all blobs referenced in the manifest exist and are unmodified.
      *
+     * @throws IllegalStateException if this weaver has not yet weaved
      * @throws IOException if an I/O error occurs
      * @throws IntegrityException if the version's integrity has been violated
      * @throws InterruptedException 
      * @throws ExecutionException 
      */
 	public void verify() throws IntegrityException, IOException, InterruptedException, ExecutionException {
+		if(vault == null) {
+			throw new IllegalStateException("Not yet weaved!");
+		}
 		vault.verifyBlobs();
 	}
 	
-    /**
-     * Internal method that performs the actual weaving process:
-     * <ul>
-     *   <li>Scans {@code sourceDir} and computes content hashes.</li>
-     *   <li>Writes new or changed blobs to {@link Vault#blobDir}.</li>
-     *   <li>Writes a versioned Chrysalis manifest JSON file.</li>
-     * </ul>
-     *
-     * @param sourceDir the source directory to scan
-     * @param vault the vault receiving the blobs and manifest
-     * @param force whether to overwrite existing files
-     * @return a new {@link ChrysalisizedVault} instance
-     * @throws IOException if an I/O error occurs
-     * @throws IntegrityException if an integrity issue is found
-     */
-	private ChrysalisizedVault weave(Path sourceDir, Vault vault, boolean force) throws IOException, IntegrityException {
-		if(!force && Files.exists(vault.getChrysalisFile(this))) {
-			throw new VersionAlreadyWeavedException(artifact.name() + " in " + vault.getChrysalisFile(this));
+	/**
+	 * Hashes the complete source directory, stores its blobs and saves either a full
+	 * snapshot or a delta against the explicit parent. Configuration is frozen when
+	 * this method first starts. Failed weaving may be retried with that same configuration.
+	 */
+	public ChrysalisizedVault weave() throws IOException, IntegrityException {
+		if (vault != null || weaving) throw new IllegalStateException("Already weaved or weaving");
+		if (frozenContext == null) {
+			frozenContext = new WeaveContext(context.vault, artifact, context.sourcesDir, contextName, force,
+				parentName, ignores, removeIgnores, tags, removeTags);
 		}
-		
-		AtomicLong preExistingBlobs = new AtomicLong();
-		AtomicLong overwrittenBlobs = new AtomicLong();
-		final Set<Path> writtenBlobs = ConcurrentHashMap.newKeySet();
-		final OpenOption[] openOptions = !force ? new StandardOpenOption[] {StandardOpenOption.CREATE_NEW} : new StandardOpenOption[] {StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING};
-		final CopyOption[] copyOptions = !force ? new StandardCopyOption[0] : new StandardCopyOption[]{StandardCopyOption.REPLACE_EXISTING};
-		Chrysalis chrysalis = Chrysalis.fromDir(sourceDir, (p, blob) -> {
-			Path blobPath = vault.blobDir.resolve(blob.hash());
-			p.set(sourceDir.relativize(p.get())); //set the path output to be relativized
-			final boolean exists = Files.exists(blobPath);
-			
-			if(!force && exists) {
-				preExistingBlobs.addAndGet(1);
-			}
-			else {
-				try {
-					if(writtenBlobs.add(blobPath)) {
-						if(exists) {
-							overwrittenBlobs.addAndGet(1);
-						}
-						
-						Files.copy(blob.dataStream(), blobPath, copyOptions);
-					}
-					else {
-						LOGGER.warn(marker, "Skipping concurrent write of " + blobPath);
-					}
-				} catch (IOException e) {
-					throw new RuntimeException(e);
+		weaving = true;
+		try {
+			vault = weave(frozenContext);
+			return vault;
+		} finally {
+			synchronized (this) { weaving = false; }
+		}
+	}
+
+	/** Shared snapshot/modification workflow; publishes JSON only after storing all bytes. */
+	protected ChrysalisizedVault weave(WeaveContext context) throws IOException, IntegrityException {
+		Vault destination = context.vault;
+		String name = context.name;
+		String parent = context.parent;
+		if (parent != null && name.equals("blobs")) {
+			throw new IllegalArgumentException("The default 'blobs' context must be a full snapshot");
+		}
+		if (name.equals(parent)) throw new DatabaseVaultCircularityError(destination, name + ".json", name + ".json");
+		if (!context.force && destination.hasChrysalis(artifact, name)) {
+			throw new VersionAlreadyWeavedException(artifact.name() + " in " + destination.getChrysalisFile(artifact, name));
+		}
+		Chrysalis base = parent == null ? Chrysalis.EMPTY.clone() : destination.chrysalisize(artifact, parent).getChrysalis();
+		String algorithm = base.getBlobFactory().algorithm();
+		ChrysalisModification metadata = new ChrysalisModification(algorithm, Map.of(), context.ignores, context.removeIgnores);
+		metadata.applyTo(base);
+		VaultContext declaration = VaultContext.modification(parent, metadata, context.tags, context.removeTags);
+		destination.validateContext(artifact, name, declaration);
+
+		IngestResult ingested = ingest(destination, context.sourcesDir, base.getBlobFactory(), context.force && parent == null);
+		Chrysalis desired = ingested.chrysalis();
+		desired.setIgnoredPaths(base.getIgnoredPaths());
+		ChrysalisModification fileChanges = ChrysalisModification.between(base, desired);
+		ChrysalisModification modification = new ChrysalisModification(algorithm, fileChanges.changes(), context.ignores, context.removeIgnores);
+		ChrysalisizedVault result = destination.saveContext(artifact, name,
+			VaultContext.modification(parent, modification, context.tags, context.removeTags), context.force);
+		var blobs = desired.blobs();
+		LOGGER.info(marker, "Context '{}': scanned {} files ({} unique blobs, {} duplicate paths)",
+			name, blobs.size(), blobs.keySet().size(), blobs.size() - blobs.keySet().size());
+		LOGGER.info(marker, "Context '{}': {} blobs newly stored, {} reused, {} overwritten",
+			name, ingested.newlyStored(), ingested.reused(), ingested.overwritten());
+		if (parent != null) {
+			long additions = 0, replacements = 0, removals = 0;
+			for (var change : modification.changes().values()) {
+				switch (change.operation()) {
+					case ADD -> additions++;
+					case REPLACE -> replacements++;
+					case REMOVE -> removals++;
 				}
 			}
-		});
-
-		LOGGER.info(marker, "");
-		LOGGER.info(marker, "===================WEAVER RESULTS===================");
-		LOGGER.info(marker, "Files found: " + chrysalis.blobs().keys().size());
-		LOGGER.info(marker, "Unique Blobs: " + chrysalis.blobs().keySet().size());
-		LOGGER.info(marker, "Duplicate Blobs " + (chrysalis.blobs().keys().size() - chrysalis.blobs().keySet().size()));
-		//LOGGER.info(marker, "PreExisting/Duplicate Blobs: " + preExistingBlobs);
-		LOGGER.info(marker, "Blobs overwritten: "+ overwrittenBlobs);
-		LOGGER.info(marker, "Blobs written: " + writtenBlobs.size());
-		LOGGER.info(marker, "====================================================");
-		LOGGER.info(marker, "");
-		
-		//Serialize and write the chrysalis to the version-specific JSON file
-		try {
-			Path chrysalisFile = vault.getChrysalisFile(this);
-			Path parent = chrysalisFile.getParent();
-			
-			if (parent != null && !Files.exists(parent)) {
-				Files.createDirectories(parent);
-			}
-			Files.writeString(chrysalisFile, GSON.toJson(chrysalis), openOptions);
-			LOGGER.info(marker, "Wrote weaved version to: " + chrysalisFile);
-		} catch (IOException e) {
-			throw new IOException("Failed to write weaved data to JSON", e);
+			LOGGER.info(marker, "Modification '{}': {} file operations ({} additions, {} replacements, {} removals)",
+				name, modification.changes().size(), additions, replacements, removals);
 		}
-		
-		return vault.chrysalisize(this);
+		LOGGER.info(marker, "Wrote weaved version to: " + result.getChrysalisFile());
+		return result;
+	}
+
+	private record IngestResult(Chrysalis chrysalis, long newlyStored, long reused, long overwritten) {}
+
+	/** Hashes and stores a directory without creating an intermediate manifest. */
+	private IngestResult ingest(Vault vault, Path directory, BlobFactory factory, boolean force)
+		throws IOException, IntegrityException {
+		if (!Files.isDirectory(directory)) throw new IOException("Expected a source directory: " + directory);
+		List<Path> files;
+		try (var paths = Files.walk(directory)) {
+			files = paths.filter(Files::isRegularFile).toList();
+		}
+		Set<Path> processed = ConcurrentHashMap.newKeySet();
+		LongAdder newlyStored = new LongAdder();
+		LongAdder reused = new LongAdder();
+		LongAdder overwritten = new LongAdder();
+		List<Callable<Map.Entry<Hash, Path>>> tasks = new ArrayList<>();
+		for (Path file : files) {
+			tasks.add(() -> {
+				Hash blob = factory.blob(file);
+				Path destination = vault.blobDir.resolve(blob.hash());
+				if (processed.add(destination)) {
+					boolean existed = Files.exists(destination);
+					if (!force && existed) {
+						factory.blob(destination, blob).verify();
+						reused.increment();
+					} else {
+						Path staging = Files.createTempFile(vault.blobDir, ".weave-", ".tmp");
+						try {
+							Files.copy(file, staging, StandardCopyOption.REPLACE_EXISTING);
+							factory.blob(staging, blob).verify();
+							try {
+								if (force) Files.move(staging, destination, StandardCopyOption.REPLACE_EXISTING);
+								else Files.move(staging, destination);
+								if (force && existed) overwritten.increment();
+								else newlyStored.increment();
+							} catch (FileAlreadyExistsException race) {
+								factory.blob(destination, blob).verify();
+								reused.increment();
+							}
+						} finally {
+							Files.deleteIfExists(staging);
+						}
+					}
+				}
+				return Map.entry(blob, directory.relativize(file));
+			});
+		}
+		var blobs = TreeMultimap.<Hash, Path>create(Comparator.comparing(Hash::hash), Comparator.naturalOrder());
+		try (var executor = Executors.newFixedThreadPool(Math.max(1, Math.min(files.size(), Runtime.getRuntime().availableProcessors())))) {
+			for (var future : executor.invokeAll(tasks)) {
+				try {
+					var entry = future.get();
+					blobs.put(entry.getKey(), entry.getValue());
+				} catch (ExecutionException e) {
+					if (e.getCause() instanceof IOException io) throw io;
+					if (e.getCause() instanceof IntegrityException integrity) throw integrity;
+					throw new IOException("Failed to weave directory " + directory, e.getCause());
+				}
+			}
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw new IOException("Weaving interrupted", e);
+		}
+		Chrysalis result = Chrysalis.EMPTY.clone().factory(factory);
+		result.setBlobs(blobs);
+		return new IngestResult(result, newlyStored.sum(), reused.sum(), overwritten.sum());
 	}
 
 
@@ -211,6 +386,27 @@ public class Weaver implements IVaultable {
 	
 	public IVaultable getArtifact() {
 		return artifact;
+	}
+	
+	protected static final record WeaveContext(Vault vault, IVaultable artifact, Path sourcesDir,
+		String name, boolean force, String parent, Set<Path> ignores, Set<Path> removeIgnores,
+		Set<String> tags, Set<String> removeTags) {
+		public WeaveContext(Vault vault, IVaultable artifact, Path sourcesDir, String name, boolean force) {
+			this(vault, artifact, sourcesDir, name, force, null, Set.of(), Set.of(), Set.of(), Set.of());
+		}
+		public WeaveContext {
+			Objects.requireNonNull(vault, "vault");
+			Objects.requireNonNull(artifact, "artifact");
+			Objects.requireNonNull(sourcesDir, "sourcesDir");
+			Vault.requireContextName(name);
+			if (parent != null) {
+				Vault.requireContextName(parent);
+			}
+			ignores = Set.copyOf(ignores);
+			removeIgnores = Set.copyOf(removeIgnores);
+			tags = Set.copyOf(tags);
+			removeTags = Set.copyOf(removeTags);
+		}
 	}
 	
 }
