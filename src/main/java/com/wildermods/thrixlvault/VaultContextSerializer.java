@@ -12,17 +12,46 @@ import com.wildermods.masshash.Hash;
 import java.util.Set;
 
 import com.google.gson.JsonElement;
-import com.google.gson.internal.bind.JsonTreeReader;
+import com.google.gson.Gson;
+import com.google.gson.TypeAdapterFactory;
+import com.google.gson.reflect.TypeToken;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 
-/** One file schema for snapshots and modifications, with readers for historical formats. */
-final class VaultContextSerializer extends TypeAdapter<VaultContext> {
-	static final int SCHEMA = 4;
+/** Writes schema 3 declarations and reads historical root schemas 0, 1 and 2. */
+public final class VaultContextSerializer extends TypeAdapter<VaultContext> implements TypeAdapterFactory {
+	static final int SCHEMA = 3;
+
+	/** Routes supported Java values through the same declaration reader and writer. */
+	@Override
+	@SuppressWarnings("unchecked")
+	public <T> TypeAdapter<T> create(Gson gson, TypeToken<T> type) {
+		Class<?> raw = type.getRawType();
+		if (raw == VaultContext.class) return (TypeAdapter<T>) nullSafe();
+		if (raw != Chrysalis.class && raw != ChrysalisModification.class) return null;
+		return new TypeAdapter<T>() {
+			@Override public void write(JsonWriter out, T value) throws IOException {
+				VaultContext context = raw == Chrysalis.class
+					? VaultContext.snapshot((Chrysalis) value, Set.of())
+					: VaultContext.modification(null, (ChrysalisModification) value, Set.of(), Set.of());
+				VaultContextSerializer.this.write(out, context);
+			}
+			@Override public T read(JsonReader in) throws IOException {
+				VaultContext context = VaultContextSerializer.this.read(in);
+				if (raw == ChrysalisModification.class) return (T) context.modification();
+				try {
+					return (T) context.rootSnapshot();
+				} catch (IllegalArgumentException | IllegalStateException e) {
+					throw new JsonParseException("Cannot read an unresolved declaration as Chrysalis", e);
+				}
+			}
+		}.nullSafe();
+	}
 
 	@Override
 	public void write(JsonWriter out, VaultContext value) throws IOException {
@@ -97,62 +126,36 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 		}
 		in.endObject();
 		try {
-			Integer version = data.has("schema") ? schemaVersion(data.get("schema")) : null;
-			if (version != null && version >= SCHEMA) {
-				if (version != SCHEMA) throw new JsonParseException("Unsupported vault schema: " + version);
-				return readUnified(data);
-			}
-			String type = optionalString(data.remove("type"));
-			String parent = optionalString(data.remove("parent"));
-			Set<String> tags = readTags(data.remove("tags"));
-			Set<String> removeTags = readTags(data.remove("removeTags"));
-			if (data.has("content")) {
-				if (version == null || version != 1) {
-					throw new JsonParseException("Unsupported legacy envelope schema: " + version);
-				}
-				data.remove("schema");
-				if (type == null) {
-					throw new JsonParseException("Versioned context requires an explicit type");
-				}
-				JsonElement content = data.remove("content");
-				if (!content.isJsonObject()) {
-					throw new JsonParseException("Context content must be an object");
-				}
-				if (!data.isEmpty()) {
-					throw new JsonParseException("Unknown context fields: " + data.keySet());
-				}
-				data = content.getAsJsonObject();
-			}
-			// Without 'content', this is the previous flat context format or a
-			// legacy full manifest: its schema belongs to the payload, not the context.
-			if (type == null) {
-				type = data.has("changes") ? "modification" : "snapshot";
-			}
-			if (type.equals("modification")) {
-				return VaultContext.modification(parent,
-					new ChrysalisModificationSerializer().readPayload(new JsonTreeReader(data)), tags, removeTags);
-			}
-			if (!type.equals("snapshot")) {
-				throw new JsonParseException("Unknown context type: " + type);
-			}
-			if (parent != null || !removeTags.isEmpty()) {
-				throw new JsonParseException("Full snapshots cannot have parents or tag removals");
-			}
-			// The legacy Chrysalis adapter expects schema/algorithm/blobs in order.
-			JsonObject ordered = new JsonObject();
-			for (String field : new String[] {"schema", "algorithm", "blobs", "ignoredPaths"}) {
-				if (data.has(field)) { ordered.add(field, data.remove(field)); }
-			}
-			if (ordered.has("schema") && !data.isEmpty()) {
-				throw new JsonParseException("Unknown snapshot fields: " + data.keySet());
-			}
-			for (var field : data.entrySet()) { ordered.add(field.getKey(), field.getValue()); }
-			try (JsonReader reader = new JsonTreeReader(ordered)) {
-				return VaultContext.snapshot(new ChrysalisSerializer().readPayload(reader), tags);
-			}
+			int version = data.has("schema") ? schemaVersion(data.remove("schema")) : 0;
+			return switch (version) {
+				case 0, 1, 2 -> readLegacyRoot(data, version);
+				case SCHEMA -> readUnified(data);
+				default -> throw new JsonParseException("Unsupported vault schema: " + version);
+			};
 		} catch (IllegalArgumentException | IllegalStateException | NullPointerException e) {
 			throw new JsonParseException("Invalid vault context: " + e.getMessage(), e);
 		}
+	}
+
+	private VaultContext readLegacyRoot(JsonObject data, int version) throws IOException {
+		String algorithm = version == 2 ? optionalString(data.remove("algorithm")) : "SHA-1";
+		JsonElement blobs = version == 0 ? data : data.remove("blobs");
+		if (algorithm == null || blobs == null || !blobs.isJsonObject()) {
+			throw new JsonParseException("Legacy schema " + version + " requires "
+				+ (version == 2 ? "algorithm and blobs" : "blobs"));
+		}
+		if (version != 0 && !data.isEmpty()) {
+			throw new JsonParseException("Unknown legacy root fields: " + data.keySet());
+		}
+		BlobFactory factory;
+		try {
+			factory = new BlobFactory(algorithm);
+		} catch (NoSuchAlgorithmException e) {
+			throw new JsonParseException("Unsupported algorithm: " + algorithm, e);
+		}
+		var builder = ChrysalisModification.builder(algorithm);
+		readGroups(blobs.getAsJsonObject(), factory).forEach(builder::add);
+		return VaultContext.modification(null, builder.build(), Set.of(), Set.of());
 	}
 
 	private VaultContext readUnified(JsonObject data) throws IOException {
@@ -168,7 +171,7 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 		Set<Path> removedIgnores = readPaths(data.remove("removeIgnore"));
 		if (algorithm == null || blobs == null || !blobs.isJsonObject()
 			|| replacements == null || !replacements.isJsonObject() || removals == null || !removals.isJsonArray()) {
-			throw new JsonParseException("Schema 4 requires algorithm, blobs, replacements and removals");
+			throw new JsonParseException("Schema 3 requires algorithm, blobs, replacements and removals");
 		}
 		if (!data.isEmpty()) throw new JsonParseException("Unknown vault fields: " + data.keySet());
 		BlobFactory factory;
@@ -225,7 +228,7 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 	// Preserve duplicate-key validation within nested changes instead of silently
 	// accepting the last value while buffering fields for order-independent reading.
 	private static JsonElement readValue(JsonReader in) throws IOException {
-		if (in.peek() == com.google.gson.stream.JsonToken.BEGIN_OBJECT) {
+		if (in.peek() == JsonToken.BEGIN_OBJECT) {
 			JsonObject object = new JsonObject();
 			in.beginObject();
 			while (in.hasNext()) {
@@ -236,7 +239,7 @@ final class VaultContextSerializer extends TypeAdapter<VaultContext> {
 			in.endObject();
 			return object;
 		}
-		if (in.peek() == com.google.gson.stream.JsonToken.BEGIN_ARRAY) {
+		if (in.peek() == JsonToken.BEGIN_ARRAY) {
 			var array = new com.google.gson.JsonArray();
 			in.beginArray();
 			while (in.hasNext()) { array.add(readValue(in)); }

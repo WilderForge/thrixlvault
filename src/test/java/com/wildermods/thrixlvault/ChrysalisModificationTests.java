@@ -165,10 +165,12 @@ class ChrysalisModificationTests {
 		Path file = temp.resolve("classpath_fix.json");
 		diff.toFile(file);
 		assertEquals(target, ChrysalisModification.fromFile(file).applyTo(base));
-		String reordered = "{\"changes\":{\"new\":{\"replacement\":\"" + original.hash()
-			+ "\",\"operation\":\"add\"}},\"algorithm\":\"SHA-1\",\"schema\":1}";
-		assertEquals(snapshot(Map.of("new", original)), Weaver.GSON.fromJson(reordered,
-			ChrysalisModification.class).applyTo(Chrysalis.EMPTY));
+		var reordered = new com.google.gson.JsonObject();
+		var fields = Weaver.GSON.toJsonTree(diff).getAsJsonObject();
+		var names = new java.util.ArrayList<>(fields.keySet());
+		java.util.Collections.reverse(names);
+		for (String name : names) reordered.add(name, fields.get(name));
+		assertEquals(target, Weaver.GSON.fromJson(reordered, ChrysalisModification.class).applyTo(base));
 	}
 
 	@Test

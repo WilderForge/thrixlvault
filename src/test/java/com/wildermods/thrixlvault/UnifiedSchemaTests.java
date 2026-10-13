@@ -20,7 +20,10 @@ class UnifiedSchemaTests {
 	private JsonObject json(Object value) { return Weaver.GSON.toJsonTree(value).getAsJsonObject(); }
 	private void sameFormat(JsonObject object) {
 		assertEquals(FIELDS, object.keySet());
-		assertEquals(4, object.get("schema").getAsInt());
+		assertEquals(java.util.List.of("schema", "parent", "algorithm", "tags", "removeTags",
+			"ignore", "removeIgnore", "removals", "replacements", "blobs"),
+			new java.util.ArrayList<>(object.keySet()));
+		assertEquals(3, object.get("schema").getAsInt());
 		assertFalse(object.has("content"));
 	}
 
@@ -52,17 +55,16 @@ class UnifiedSchemaTests {
 		loaded.verifyDirectory(source);
 	}
 
-	@Test void legacySnapshotSchemasAndEnvelopeUpgradeWithoutChangingExpectations() throws Exception {
+	@Test void legacyRootSchemasUpgradeWithoutChangingExpectations() throws Exception {
 		Vault vault = new Vault(temp.resolve("vault"));
 		Files.createDirectories(vault.getChrysalisFile(ARTIFACT).getParent());
 		String hash = new BlobFactory().blob(new byte[] {1}).hash();
 		String blobs = "{\"" + hash + "\":[\"file\",\"copy\"]}";
 		String[] legacy = {
 			blobs,
+			"{\"schema\":0," + blobs.substring(1),
 			"{\"schema\":1,\"blobs\":" + blobs + "}",
-			"{\"schema\":2,\"algorithm\":\"SHA-1\",\"blobs\":" + blobs + "}",
-			"{\"schema\":3,\"algorithm\":\"SHA-1\",\"blobs\":" + blobs + ",\"ignoredPaths\":[\"file\"]}",
-			"{\"schema\":1,\"type\":\"snapshot\",\"tags\":[\"strict\"],\"content\":{\"schema\":3,\"algorithm\":\"SHA-1\",\"blobs\":" + blobs + ",\"ignoredPaths\":[\"file\"]}}"
+			"{\"blobs\":" + blobs + ",\"algorithm\":\"SHA-1\",\"schema\":2}"
 		};
 		for (int i = 0; i < legacy.length; i++) {
 			String name = "legacy-" + i;
@@ -71,6 +73,8 @@ class UnifiedSchemaTests {
 			var loaded = vault.chrysalisize(ARTIFACT, name);
 			assertEquals(legacy[i], Files.readString(file), "Loading must not rewrite files");
 			assertEquals(2, loaded.getChrysalis().blobs().size());
+			assertTrue(loaded.getParent().isEmpty());
+			assertEquals("SHA-1", loaded.getChrysalis().getBlobFactory().algorithm());
 			var upgraded = loaded.saveAs(name, true);
 			sameFormat(Weaver.GSON.fromJson(Files.readString(file), JsonObject.class));
 			assertEquals(loaded.getChrysalis(), upgraded.getChrysalis());
@@ -78,32 +82,30 @@ class UnifiedSchemaTests {
 		}
 	}
 
-	@Test void legacyModificationsAndEnvelopePreserveParentsTagsAndIgnoreOperations() throws Exception {
-		Vault vault = new Vault(temp.resolve("vault"));
-		var base = vault.saveSnapshot(ARTIFACT, "blobs", Chrysalis.EMPTY.clone(), Set.of("strict", "vendor:unknown"));
-		String hash = new BlobFactory().blob(new byte[] {1}).hash();
-		String change = "\"changes\":{\"new\":{\"operation\":\"add\",\"replacement\":\"" + hash + "\"}}";
-		String payload1 = "{\"schema\":1,\"algorithm\":\"SHA-1\"," + change + "}";
-		String payload2 = "{\"schema\":2,\"algorithm\":\"SHA-1\"," + change + ",\"ignore\":[\"new\"],\"removeIgnore\":[]}";
-		String[] legacy = {payload1, payload2,
-			"{\"schema\":1,\"type\":\"modification\",\"parent\":\"blobs\",\"tags\":[\"modded\"],\"removeTags\":[\"strict\"],\"content\":" + payload2 + "}"};
-		for (int i = 0; i < legacy.length; i++) {
-			Path file = vault.getChrysalisFile(ARTIFACT, "legacy-" + i);
-			Files.writeString(file, legacy[i]);
-			var loaded = vault.chrysalisize(ARTIFACT, "legacy-" + i);
-			var upgraded = loaded.saveAs("upgraded-" + i);
-			sameFormat(Weaver.GSON.fromJson(Files.readString(upgraded.getChrysalisFile()), JsonObject.class));
-			assertEquals(loaded.getChrysalis(), upgraded.getChrysalis());
-			assertEquals(loaded.getLocalTags(), upgraded.getLocalTags());
-			assertEquals(loaded.getRemovedTags(), upgraded.getRemovedTags());
-			assertEquals(loaded.getParent().map(ChrysalisizedVault::getContextName), upgraded.getParent().map(ChrysalisizedVault::getContextName));
-		}
-		assertEquals(Set.of("modded", "vendor:unknown"), vault.chrysalisize(ARTIFACT, "upgraded-2").getTags());
+	@Test void legacyRootsRejectDevelopmentEnvelopesAndParents() {
+		for (String json : new String[] {
+			"{\"schema\":1,\"blobs\":{},\"parent\":\"blobs\"}",
+			"{\"schema\":2,\"algorithm\":\"SHA-1\",\"changes\":{}}",
+			"{\"schema\":1,\"type\":\"snapshot\",\"content\":{}}",
+			"{\"schema\":3,\"algorithm\":\"SHA-1\",\"blobs\":{},\"ignoredPaths\":[]}"
+		}) assertThrows(JsonParseException.class, () -> Weaver.GSON.fromJson(json, VaultContext.class));
+	}
+
+	@Test void emptySchemaZeroAndLegacySha256AreSupported() throws Exception {
+		assertEquals(Chrysalis.EMPTY, Weaver.GSON.fromJson("{}", VaultContext.class).rootSnapshot());
+		assertEquals(Chrysalis.EMPTY, Weaver.GSON.fromJson("{\"schema\":0}", VaultContext.class).rootSnapshot());
+		var factory = new BlobFactory("SHA-256");
+		String hash = factory.blob(new byte[] {1}).hash();
+		var context = Weaver.GSON.fromJson("{\"blobs\":{\"" + hash
+			+ "\":[\"file\"]},\"schema\":2,\"algorithm\":\"SHA-256\"}", VaultContext.class);
+		assertNull(context.parent());
+		assertEquals("SHA-256", context.modification().algorithm());
+		assertEquals(hash, context.rootSnapshot().blobs().keySet().iterator().next().hash());
 	}
 
 	@Test void unifiedSchemaRejectsInvalidVersionsFieldsAndMixedPayloads() {
 		JsonObject empty = json(VaultContext.snapshot(Chrysalis.EMPTY.clone(), Set.of()));
-		for (String value : Set.of("5", "99", "4.5", "\"4\"", "null", "true")) {
+		for (String value : Set.of("-1", "4", "5", "99", "4.5", "\"4\"", "null", "true")) {
 			var invalid = empty.deepCopy(); invalid.add("schema", com.google.gson.JsonParser.parseString(value));
 			assertThrows(JsonParseException.class, () -> Weaver.GSON.fromJson(invalid, VaultContext.class));
 		}
@@ -119,11 +121,11 @@ class UnifiedSchemaTests {
 		assertThrows(JsonParseException.class, () -> Weaver.GSON.fromJson(typed, VaultContext.class));
 		var malformedRemovals = empty.deepCopy(); malformedRemovals.add("removals", new JsonObject());
 		assertThrows(JsonParseException.class, () -> Weaver.GSON.fromJson(malformedRemovals, VaultContext.class));
-		String duplicate = empty.toString().replace("\"schema\":4", "\"schema\":4,\"schema\":4");
+		String duplicate = empty.toString().replace("\"schema\":3", "\"schema\":3,\"schema\":3");
 		assertThrows(JsonParseException.class, () -> Weaver.GSON.fromJson(duplicate, VaultContext.class));
 	}
 
-	@Test void schema4PropertyOrderAndSha256RoundTripAreSupported() throws Exception {
+	@Test void schema3PropertyOrderAndSha256RoundTripAreSupported() throws Exception {
 		BlobFactory factory = new BlobFactory("SHA-256"); Hash hash = factory.blob(new byte[] {1});
 		var modification = ChrysalisModification.builder("SHA-256").add(Path.of("copy"), hash).ignore(Path.of("cache")).build();
 		JsonObject original = json(VaultContext.modification(null, modification, Set.of("vendor:custom"), Set.of("absent")));

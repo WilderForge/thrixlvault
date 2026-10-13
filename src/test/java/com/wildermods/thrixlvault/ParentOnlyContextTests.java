@@ -31,7 +31,7 @@ class ParentOnlyContextTests {
 		JsonObject rootJson = json(root.getContext().orElseThrow());
 		JsonObject childJson = json(child.getContext().orElseThrow());
 		assertFalse(rootJson.has("type")); assertFalse(childJson.has("type"));
-		assertEquals(4, rootJson.get("schema").getAsInt());
+		assertEquals(3, rootJson.get("schema").getAsInt());
 		assertEquals(rootJson.keySet(), childJson.keySet());
 		childJson.add("parent", com.google.gson.JsonNull.INSTANCE);
 		assertEquals(rootJson, childJson);

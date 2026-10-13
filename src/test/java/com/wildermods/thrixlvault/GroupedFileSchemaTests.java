@@ -31,7 +31,7 @@ class GroupedFileSchemaTests {
 			.replace(Path.of("replace-b"), old, replacement).replace(Path.of("replace-a"), old, replacement)
 			.remove(Path.of("remove-b"), old).remove(Path.of("remove-a"), old).build();
 		JsonObject serialized = json(patch);
-		assertEquals(4, serialized.get("schema").getAsInt());
+		assertEquals(3, serialized.get("schema").getAsInt());
 		assertFalse(serialized.has("changes")); assertFalse(serialized.has("additions"));
 		assertEquals("[\"add-a\",\"add-b\"]", serialized.getAsJsonObject("blobs").get(replacement.hash()).toString());
 		assertEquals("[\"replace-a\",\"replace-b\"]", serialized.getAsJsonObject("replacements").get(replacement.hash()).toString());

@@ -59,9 +59,7 @@ public class Weaver implements IWeaver {
 	public static final Gson GSON;
 	static {
 		GsonBuilder builder = new GsonBuilder();
-		builder.registerTypeAdapter(Chrysalis.class, new ChrysalisSerializer());
-		builder.registerTypeAdapter(VaultContext.class, new VaultContextSerializer().nullSafe());
-		builder.registerTypeAdapter(ChrysalisModification.class, new ChrysalisModificationSerializer().nullSafe());
+		builder.registerTypeAdapterFactory(new VaultContextSerializer());
 		builder.setPrettyPrinting().setFormattingStyle(FormattingStyle.PRETTY.withIndent("\t"));
 		GSON = builder.create();
 	}
@@ -403,7 +401,9 @@ public class Weaver implements IWeaver {
 			Objects.requireNonNull(artifact, "artifact");
 			Objects.requireNonNull(sourcesDir, "sourcesDir");
 			Vault.requireContextName(name);
-			if (parent != null) Vault.requireContextName(parent);
+			if (parent != null) {
+				Vault.requireContextName(parent);
+			}
 			ignores = Set.copyOf(ignores);
 			removeIgnores = Set.copyOf(removeIgnores);
 			tags = Set.copyOf(tags);

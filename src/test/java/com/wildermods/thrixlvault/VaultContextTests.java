@@ -164,7 +164,7 @@ class VaultContextTests {
 	@Test
 	void propertyOrderAndExplicitOverwriteAreSupported() throws Exception {
 		var f = fixture();
-		String json = "{\"changes\":{},\"tags\":[\"strict\"],\"algorithm\":\"SHA-1\",\"parent\":\"blobs\",\"schema\":2,\"type\":\"modification\"}";
+		String json = "{\"blobs\":{},\"replacements\":{},\"removals\":[],\"tags\":[\"strict\"],\"algorithm\":\"SHA-1\",\"parent\":\"blobs\",\"schema\":3}";
 		var context = Weaver.GSON.fromJson(json, VaultContext.class);
 		var saved = f.vault.saveContext(ARTIFACT, "ordered", context);
 		assertEquals(Set.of("strict"), saved.getTags());
@@ -178,17 +178,17 @@ class VaultContextTests {
 	void oneSchemaCoversTheWholeDeclarationAndLegacyFilesUpgrade() {
 		VaultContext context = VaultContext.modification("blobs", builder().build(), Set.of("strict"), Set.of());
 		var json = Weaver.GSON.toJsonTree(context).getAsJsonObject();
-		assertEquals(4, json.get("schema").getAsInt());
+		assertEquals(3, json.get("schema").getAsInt());
 		assertFalse(json.has("content"));
 		assertTrue(json.has("algorithm"));
 		var parsed = Weaver.GSON.fromJson(json, VaultContext.class);
 		assertEquals(context.parent(), parsed.parent());
 		assertEquals(context.tags(), parsed.tags());
-		String legacy = "{\"type\":\"modification\",\"parent\":\"blobs\",\"tags\":[\"strict\"],"
-			+ "\"schema\":2,\"algorithm\":\"SHA-1\",\"changes\":{}}";
-		var upgraded = Weaver.GSON.toJsonTree(Weaver.GSON.fromJson(legacy, VaultContext.class)).getAsJsonObject();
-		assertEquals(4, upgraded.get("schema").getAsInt());
-		assertFalse(upgraded.has("content"));
+		String legacy = "{\"schema\":2,\"algorithm\":\"SHA-1\",\"blobs\":{}}";
+		var root = Weaver.GSON.fromJson(legacy, VaultContext.class);
+		assertNull(root.parent());
+		var upgraded = Weaver.GSON.toJsonTree(root).getAsJsonObject();
+		assertEquals(3, upgraded.get("schema").getAsInt());
 		assertTrue(upgraded.has("blobs"));
 		assertTrue(upgraded.has("replacements"));
 		assertTrue(upgraded.has("removals"));
